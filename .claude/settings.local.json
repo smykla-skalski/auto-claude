@@ -8,7 +8,8 @@
       "Bash(go build:*)",
       "Bash(go vet:*)",
       "Bash(git pull:*)",
-      "Bash(go test:*)"
+      "Bash(go test:*)",
+      "Bash(git rebase:*)"
     ]
   }
 }

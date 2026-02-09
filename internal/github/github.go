@@ -50,6 +50,7 @@ type Check struct {
 }
 
 type ReviewThread struct {
+	ID         string          `json:"id"`
 	IsResolved bool            `json:"isResolved"`
 	IsOutdated bool            `json:"isOutdated"`
 	Path       string          `json:"path"`
@@ -125,6 +126,7 @@ type graphQLResponse struct {
 }
 
 type graphQLThread struct {
+	ID         string `json:"id"`
 	IsResolved bool   `json:"isResolved"`
 	IsOutdated bool   `json:"isOutdated"`
 	Path       string `json:"path"`
@@ -151,6 +153,7 @@ func (c *Client) GetReviewThreads(ctx context.Context, owner, repo string, numbe
           endCursor
         }
         nodes {
+          id
           isResolved
           isOutdated
           path
@@ -194,6 +197,7 @@ func (c *Client) GetReviewThreads(ctx context.Context, owner, repo string, numbe
 
 		for _, t := range resp.Data.Repository.PullRequest.ReviewThreads.Nodes {
 			rt := ReviewThread{
+				ID:         t.ID,
 				IsResolved: t.IsResolved,
 				IsOutdated: t.IsOutdated,
 				Path:       t.Path,
@@ -215,6 +219,30 @@ func (c *Client) GetReviewThreads(ctx context.Context, owner, repo string, numbe
 	}
 
 	return threads, nil
+}
+
+func (c *Client) ResolveReviewThread(ctx context.Context, threadID string) error {
+	mutation := `mutation($threadID: ID!) {
+  resolveReviewThread(input: {threadId: $threadID}) {
+    thread {
+      id
+      isResolved
+    }
+  }
+}`
+
+	args := []string{
+		"api", "graphql",
+		"-f", "threadID=" + threadID,
+		"-f", "query=" + mutation,
+	}
+
+	_, err := c.gh(ctx, args...)
+	if err != nil {
+		return fmt.Errorf("resolve review thread %s: %w", threadID, err)
+	}
+
+	return nil
 }
 
 func (c *Client) MergePR(ctx context.Context, owner, repo string, number int, method string) error {

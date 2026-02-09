@@ -72,26 +72,26 @@ func (w *Worker) fixChecks(ctx context.Context, wtDir string) error {
 func (w *Worker) fixReviews(ctx context.Context, wtDir string) error {
 	w.logger.Info("fixing review comments")
 
-	// Use cached review threads
-	var unresolvedCount int
+	// Collect unresolved Copilot review threads
+	var unresolvedThreads []string
 	for _, t := range w.cachedReviewThreads {
 		if t.IsResolved || t.IsOutdated {
 			continue
 		}
 		for _, c := range t.Comments {
 			if isCopilotAuthor(c.Author) {
-				unresolvedCount++
+				unresolvedThreads = append(unresolvedThreads, t.ID)
 				break
 			}
 		}
 	}
 
-	if unresolvedCount == 0 {
+	if len(unresolvedThreads) == 0 {
 		w.logger.Info("no unresolved copilot reviews found")
 		return nil
 	}
 
-	w.logger.Info("found unresolved copilot reviews", "count", unresolvedCount)
+	w.logger.Info("found unresolved copilot reviews", "count", len(unresolvedThreads))
 
 	if err := w.git.Fetch(ctx, wtDir); err != nil {
 		return fmt.Errorf("fetch: %w", err)
@@ -110,7 +110,16 @@ func (w *Worker) fixReviews(ctx context.Context, wtDir string) error {
 		return fmt.Errorf("push: %w", err)
 	}
 
-	w.logger.Info("reviews fixed and pushed")
+	// Auto-resolve all Copilot review threads after successful fix
+	w.logger.Info("resolving copilot review threads", "count", len(unresolvedThreads))
+	for _, threadID := range unresolvedThreads {
+		if err := w.gh.ResolveReviewThread(ctx, threadID); err != nil {
+			w.logger.Error("failed to resolve thread", "thread_id", threadID, "err", err)
+			// Continue with other threads even if one fails
+		}
+	}
+
+	w.logger.Info("reviews fixed, pushed, and resolved")
 	return nil
 }
 
