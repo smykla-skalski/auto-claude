@@ -119,6 +119,9 @@ func (w *Worker) Run(ctx context.Context) error {
 			w.cachedReviewThreads = threads
 		}
 
+		// Reset counter after successful PR and thread fetch
+		consecutiveFailures = 0
+
 		s := w.evaluate()
 		w.logger.Info("evaluated state", "state", stateString(s))
 
@@ -179,11 +182,18 @@ func (w *Worker) Run(ctx context.Context) error {
 		if actionErr != nil {
 			w.logger.Error("action failed", "state", stateString(s), "err", actionErr)
 			consecutiveFailures++
+			w.sleep(ctx, consecutiveFailures)
 		} else {
-			consecutiveFailures = 0
+			if s == stateReviewsPending {
+				// No review action performed (or nothing left to do); keep monitoring this PR
+				w.logger.Info("no review actions performed, continuing to monitor PR")
+				w.sleep(ctx, 0)
+				continue
+			}
+			// Exit after successful action, let next poll cycle evaluate fresh state
+			w.logger.Info("action completed, exiting worker")
+			return nil
 		}
-
-		w.sleep(ctx, consecutiveFailures)
 	}
 }
 
