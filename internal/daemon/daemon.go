@@ -158,14 +158,7 @@ func (d *Daemon) pollRepo(ctx context.Context, repo config.RepoConfig) error {
 		}
 
 		// Skip blocked/on-hold PRs at poll level
-		hasBlockingLabel := false
-		for _, label := range pr.Labels {
-			if label.Name == "blocked" || label.Name == "on-hold" {
-				hasBlockingLabel = true
-				break
-			}
-		}
-		if hasBlockingLabel {
+		if hasBlockingLabel(pr) {
 			continue
 		}
 
@@ -360,11 +353,18 @@ func (d *Daemon) GetSnapshot() tui.Snapshot {
 
 		prStates := make([]tui.PRState, 0, len(prs))
 		repoWorkers := 0
+		blockedCount := 0
 		for _, pr := range prs {
 			wk := workerKey(repo.Owner, repo.Name, pr.Number)
 			hasWorker := workersCopy[wk]
 			if hasWorker {
 				repoWorkers++
+			}
+
+			// Skip PRs with blocked/on-hold labels
+			if hasBlockingLabel(pr) {
+				blockedCount++
+				continue
 			}
 
 			hasCopilotReview := copilotCacheCopy[wk]
@@ -379,10 +379,11 @@ func (d *Daemon) GetSnapshot() tui.Snapshot {
 		}
 
 		repos = append(repos, tui.RepoState{
-			Owner:   repo.Owner,
-			Name:    repo.Name,
-			PRs:     prStates,
-			Workers: repoWorkers,
+			Owner:      repo.Owner,
+			Name:       repo.Name,
+			PRs:        prStates,
+			BlockedPRs: blockedCount,
+			Workers:    repoWorkers,
 		})
 	}
 
@@ -394,13 +395,28 @@ func (d *Daemon) GetSnapshot() tui.Snapshot {
 	}
 }
 
-func isCopilotAuthor(author string) bool {
-	copilotAuthors := map[string]bool{
-		"Copilot":                       true,
-		"copilot":                       true,
-		"github-copilot[bot]":           true,
-		"copilot-pull-request-reviewer": true,
+var blockingLabels = map[string]bool{
+	"blocked": true,
+	"on-hold": true,
+}
+
+func hasBlockingLabel(pr github.PRInfo) bool {
+	for _, label := range pr.Labels {
+		if blockingLabels[label.Name] {
+			return true
+		}
 	}
+	return false
+}
+
+var copilotAuthors = map[string]bool{
+	"Copilot":                       true,
+	"copilot":                       true,
+	"github-copilot[bot]":           true,
+	"copilot-pull-request-reviewer": true,
+}
+
+func isCopilotAuthor(author string) bool {
 	return copilotAuthors[author]
 }
 

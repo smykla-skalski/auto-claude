@@ -12,6 +12,12 @@ repos:
     merge_method: squash
     max_concurrent_prs: 3
     require_copilot_review: true
+  - owner: automaat
+    name: ai-casino
+    base_branch: main
+    merge_method: squash
+    max_concurrent_prs: 3
+    require_copilot_review: true
 
 log:
   level: debug
