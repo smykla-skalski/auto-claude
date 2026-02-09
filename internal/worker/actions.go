@@ -33,8 +33,7 @@ func (w *Worker) resolveConflicts(ctx context.Context, wtDir string) error {
 	}
 
 	if !hasChanges {
-		w.logger.Warn("claude completed but created no commits, skipping push")
-		return fmt.Errorf("no commits created")
+		return fmt.Errorf("no commits created by claude, cannot push")
 	}
 
 	if err := w.git.Push(ctx, wtDir, w.pr.HeadRef); err != nil {
@@ -79,8 +78,7 @@ func (w *Worker) fixChecks(ctx context.Context, wtDir string) error {
 	}
 
 	if !hasChanges {
-		w.logger.Warn("claude completed but created no commits, skipping push")
-		return fmt.Errorf("no commits created")
+		return fmt.Errorf("no commits created by claude, cannot push")
 	}
 
 	if err := w.git.Push(ctx, wtDir, w.pr.HeadRef); err != nil {
@@ -135,8 +133,7 @@ func (w *Worker) fixReviews(ctx context.Context, wtDir string) error {
 	}
 
 	if !hasChanges {
-		w.logger.Warn("claude completed but created no commits, skipping push and thread resolution")
-		return nil
+		return fmt.Errorf("no commits created by claude, cannot push")
 	}
 
 	if err := w.git.Push(ctx, wtDir, w.pr.HeadRef); err != nil {
