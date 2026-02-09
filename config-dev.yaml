@@ -1,0 +1,15 @@
+poll_interval: 30s
+workdir: /tmp/auto-claude-dev
+
+claude:
+  model: sonnet
+
+repos:
+  - owner: automaat
+    name: auto-claude
+    base_branch: main
+    merge_method: squash
+    max_concurrent_prs: 1
+
+log:
+  level: debug

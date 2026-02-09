@@ -1,0 +1,17 @@
+poll_interval: 60s
+workdir: /tmp/auto-claude
+
+claude:
+  model: opus
+
+repos:
+  - owner: myorg
+    name: myrepo
+    base_branch: main
+    exclude_authors:
+      - dependabot[bot]
+    merge_method: squash
+    max_concurrent_prs: 3
+
+log:
+  level: info
