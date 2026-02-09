@@ -27,8 +27,13 @@ type PRInfo struct {
 	Author            Author      `json:"author"`
 	Mergeable         string      `json:"mergeable"`
 	MergeStateStatus  string      `json:"mergeStateStatus"`
+	Labels            []Label     `json:"labels"`
 	Checks            []Check     `json:"-"`
 	StatusCheckRollup []checkNode `json:"statusCheckRollup"`
+}
+
+type Label struct {
+	Name string `json:"name"`
 }
 
 type Author struct {
@@ -67,7 +72,7 @@ func (c *Client) ListOpenPRs(ctx context.Context, owner, repo string) ([]PRInfo,
 	args := []string{
 		"pr", "list",
 		"-R", owner + "/" + repo,
-		"--json", "number,title,headRefName,baseRefName,url,isDraft,author,mergeable,mergeStateStatus,statusCheckRollup",
+		"--json", "number,title,headRefName,baseRefName,url,isDraft,author,mergeable,mergeStateStatus,labels,statusCheckRollup",
 		"--limit", "100",
 	}
 
@@ -92,7 +97,7 @@ func (c *Client) GetPRDetail(ctx context.Context, owner, repo string, number int
 	args := []string{
 		"pr", "view", fmt.Sprintf("%d", number),
 		"-R", owner + "/" + repo,
-		"--json", "number,title,headRefName,baseRefName,url,isDraft,author,mergeable,mergeStateStatus,statusCheckRollup",
+		"--json", "number,title,headRefName,baseRefName,url,isDraft,author,mergeable,mergeStateStatus,labels,statusCheckRollup",
 	}
 
 	out, err := c.gh(ctx, args...)

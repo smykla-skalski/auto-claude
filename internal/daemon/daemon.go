@@ -157,6 +157,18 @@ func (d *Daemon) pollRepo(ctx context.Context, repo config.RepoConfig) error {
 			continue
 		}
 
+		// Skip blocked/on-hold PRs at poll level
+		hasBlockingLabel := false
+		for _, label := range pr.Labels {
+			if label.Name == "blocked" || label.Name == "on-hold" {
+				hasBlockingLabel = true
+				break
+			}
+		}
+		if hasBlockingLabel {
+			continue
+		}
+
 		d.mu.Lock()
 		_, running := d.workers[key]
 		d.mu.Unlock()
