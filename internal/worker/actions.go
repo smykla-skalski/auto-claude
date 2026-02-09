@@ -18,7 +18,17 @@ func (w *Worker) resolveConflicts(ctx context.Context, wtDir string) error {
 		w.repo.BaseBranch, w.repo.BaseBranch,
 	)
 
+	w.onClaudeStart("resolving_conflicts")
+	endCalled := false
+	defer func() {
+		if !endCalled {
+			w.onClaudeEnd()
+		}
+	}()
+
 	result, err := w.claude.Run(ctx, wtDir, prompt)
+	w.onClaudeEnd()
+	endCalled = true
 	if err != nil {
 		return fmt.Errorf("claude resolve conflicts: %w", err)
 	}
@@ -63,7 +73,17 @@ func (w *Worker) fixChecks(ctx context.Context, wtDir string) error {
 		strings.Join(failing, ", "),
 	)
 
+	w.onClaudeStart("fixing_checks")
+	endCalled := false
+	defer func() {
+		if !endCalled {
+			w.onClaudeEnd()
+		}
+	}()
+
 	result, err := w.claude.Run(ctx, wtDir, prompt)
+	w.onClaudeEnd()
+	endCalled = true
 	if err != nil {
 		return fmt.Errorf("claude fix checks: %w", err)
 	}
@@ -117,8 +137,18 @@ func (w *Worker) fixReviews(ctx context.Context, wtDir string) error {
 		return fmt.Errorf("fetch: %w", err)
 	}
 
+	w.onClaudeStart("fixing_reviews")
+	endCalled := false
+	defer func() {
+		if !endCalled {
+			w.onClaudeEnd()
+		}
+	}()
+
 	prURL := fmt.Sprintf("https://github.com/%s/%s/pull/%d", w.repo.Owner, w.repo.Name, w.pr.Number)
 	result, err := w.claude.RunCommand(ctx, wtDir, "fix-review-auto", prURL)
+	w.onClaudeEnd()
+	endCalled = true
 	if err != nil {
 		return fmt.Errorf("claude fix reviews: %w", err)
 	}

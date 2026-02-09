@@ -14,6 +14,13 @@ import (
 	"github.com/marcin-skalski/auto-claude/internal/worker"
 )
 
+type claudeSession struct {
+	repo     string
+	prNumber int
+	action   string
+	started  time.Time
+}
+
 type Daemon struct {
 	cfg    *config.Config
 	gh     *github.Client
@@ -24,16 +31,20 @@ type Daemon struct {
 	mu      sync.Mutex
 	workers map[string]context.CancelFunc
 	wg      sync.WaitGroup
+
+	sessionsMu     sync.Mutex
+	claudeSessions map[string]*claudeSession
 }
 
 func New(cfg *config.Config, gh *github.Client, cl *claude.Client, g *git.Client, logger *slog.Logger) *Daemon {
 	return &Daemon{
-		cfg:     cfg,
-		gh:      gh,
-		claude:  cl,
-		git:     g,
-		logger:  logger,
-		workers: make(map[string]context.CancelFunc),
+		cfg:            cfg,
+		gh:             gh,
+		claude:         cl,
+		git:            g,
+		logger:         logger,
+		workers:        make(map[string]context.CancelFunc),
+		claudeSessions: make(map[string]*claudeSession),
 	}
 }
 
@@ -46,6 +57,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 	ticker := time.NewTicker(d.cfg.PollInterval)
 	defer ticker.Stop()
 
+	statusTicker := time.NewTicker(5 * time.Second)
+	defer statusTicker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -56,6 +70,8 @@ func (d *Daemon) Run(ctx context.Context) error {
 			return nil
 		case <-ticker.C:
 			d.poll(ctx)
+		case <-statusTicker.C:
+			d.logClaudeStatus()
 		}
 	}
 }
@@ -137,7 +153,15 @@ func (d *Daemon) startWorker(ctx context.Context, repo config.RepoConfig, pr git
 	d.workers[key] = cancel
 	d.mu.Unlock()
 
-	w := worker.New(repo, pr, d.gh, d.claude, d.git, d.logger)
+	repoFullName := repo.Owner + "/" + repo.Name
+	onClaudeStart := func(action string) {
+		d.trackClaudeStart(key, repoFullName, pr.Number, action)
+	}
+	onClaudeEnd := func() {
+		d.trackClaudeEnd(key)
+	}
+
+	w := worker.New(repo, pr, d.gh, d.claude, d.git, d.logger, onClaudeStart, onClaudeEnd)
 
 	d.wg.Add(1)
 	go func() {
@@ -190,4 +214,44 @@ func isExcluded(author string, excluded []string) bool {
 		}
 	}
 	return false
+}
+
+func (d *Daemon) trackClaudeStart(key string, repo string, prNumber int, action string) {
+	d.sessionsMu.Lock()
+	defer d.sessionsMu.Unlock()
+	d.claudeSessions[key] = &claudeSession{
+		repo:     repo,
+		prNumber: prNumber,
+		action:   action,
+		started:  time.Now(),
+	}
+}
+
+func (d *Daemon) trackClaudeEnd(key string) {
+	d.sessionsMu.Lock()
+	defer d.sessionsMu.Unlock()
+	delete(d.claudeSessions, key)
+}
+
+func (d *Daemon) logClaudeStatus() {
+	d.sessionsMu.Lock()
+	sessions := make([]*claudeSession, 0, len(d.claudeSessions))
+	for _, s := range d.claudeSessions {
+		sessions = append(sessions, s)
+	}
+	d.sessionsMu.Unlock()
+
+	if len(sessions) == 0 {
+		return
+	}
+
+	d.logger.Info("active claude sessions", "count", len(sessions))
+	for _, s := range sessions {
+		duration := time.Since(s.started).Round(time.Second)
+		d.logger.Info("→ claude session",
+			"repo", s.repo,
+			"pr", s.prNumber,
+			"action", s.action,
+			"duration", duration)
+	}
 }

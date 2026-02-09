@@ -9,7 +9,8 @@
       "Bash(go vet:*)",
       "Bash(git pull:*)",
       "Bash(go test:*)",
-      "Bash(git rebase:*)"
+      "Bash(git rebase:*)",
+      "Bash(gofmt:*)"
     ]
   }
 }
