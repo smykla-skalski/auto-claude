@@ -193,16 +193,18 @@ func (w *Worker) evaluate() state {
 		}
 	}
 
-	// Check Copilot review status before merging
-	copilotStatus := w.checkCopilotReviewStatus()
-	switch copilotStatus {
-	case copilotNotReviewed:
-		w.logger.Info("waiting for Copilot review to complete")
-		return stateChecksPending
-	case copilotUnresolved:
-		return stateReviewsPending
-	case copilotResolved:
-		// Continue to merge readiness check
+	// Check Copilot review status before merging (if required)
+	if *w.repo.RequireCopilotReview {
+		copilotStatus := w.checkCopilotReviewStatus()
+		switch copilotStatus {
+		case copilotNotReviewed:
+			w.logger.Info("waiting for Copilot review to complete")
+			return stateChecksPending
+		case copilotUnresolved:
+			return stateReviewsPending
+		case copilotResolved:
+			// Continue to merge readiness check
+		}
 	}
 
 	// If merge state is blocked, could be other review requirements

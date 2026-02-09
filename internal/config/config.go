@@ -22,12 +22,13 @@ type ClaudeConfig struct {
 }
 
 type RepoConfig struct {
-	Owner            string   `yaml:"owner"`
-	Name             string   `yaml:"name"`
-	BaseBranch       string   `yaml:"base_branch"`
-	ExcludeAuthors   []string `yaml:"exclude_authors"`
-	MergeMethod      string   `yaml:"merge_method"`
-	MaxConcurrentPRs int      `yaml:"max_concurrent_prs"`
+	Owner              string   `yaml:"owner"`
+	Name               string   `yaml:"name"`
+	BaseBranch         string   `yaml:"base_branch"`
+	ExcludeAuthors     []string `yaml:"exclude_authors"`
+	MergeMethod        string   `yaml:"merge_method"`
+	MaxConcurrentPRs   int      `yaml:"max_concurrent_prs"`
+	RequireCopilotReview *bool  `yaml:"require_copilot_review,omitempty"`
 }
 
 type LogConfig struct {
@@ -85,6 +86,10 @@ func (c *Config) setDefaults() error {
 		}
 		if c.Repos[i].MaxConcurrentPRs == 0 {
 			c.Repos[i].MaxConcurrentPRs = 3
+		}
+		if c.Repos[i].RequireCopilotReview == nil {
+			defaultTrue := true
+			c.Repos[i].RequireCopilotReview = &defaultTrue
 		}
 	}
 
