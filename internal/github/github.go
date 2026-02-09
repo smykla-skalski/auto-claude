@@ -245,6 +245,70 @@ func (c *Client) ResolveReviewThread(ctx context.Context, threadID string) error
 	return nil
 }
 
+func (c *Client) UpdateBranch(ctx context.Context, owner, repo string, number int) error {
+	mutation := `mutation($prID: ID!) {
+  updatePullRequestBranch(input: {pullRequestId: $prID}) {
+    pullRequest {
+      id
+    }
+  }
+}`
+
+	// Get PR node ID first
+	prIDQuery := `query($owner: String!, $repo: String!, $num: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $num) {
+      id
+    }
+  }
+}`
+
+	args := []string{
+		"api", "graphql",
+		"-f", "owner=" + owner,
+		"-f", "repo=" + repo,
+		"-F", fmt.Sprintf("num=%d", number),
+		"-f", "query=" + prIDQuery,
+	}
+
+	out, err := c.gh(ctx, args...)
+	if err != nil {
+		return fmt.Errorf("get PR ID: %w", err)
+	}
+
+	var resp struct {
+		Data struct {
+			Repository struct {
+				PullRequest struct {
+					ID string `json:"id"`
+				} `json:"pullRequest"`
+			} `json:"repository"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(out, &resp); err != nil {
+		return fmt.Errorf("parse PR ID: %w", err)
+	}
+
+	prID := resp.Data.Repository.PullRequest.ID
+	if prID == "" {
+		return fmt.Errorf("PR ID not found")
+	}
+
+	// Update branch
+	args = []string{
+		"api", "graphql",
+		"-f", "prID=" + prID,
+		"-f", "query=" + mutation,
+	}
+
+	_, err = c.gh(ctx, args...)
+	if err != nil {
+		return fmt.Errorf("update branch: %w", err)
+	}
+
+	return nil
+}
+
 func (c *Client) MergePR(ctx context.Context, owner, repo string, number int, method string) error {
 	args := []string{
 		"pr", "merge", fmt.Sprintf("%d", number),

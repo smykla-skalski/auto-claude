@@ -157,5 +157,14 @@ func (w *Worker) fixReviews(ctx context.Context, wtDir string) error {
 }
 
 func (w *Worker) merge(ctx context.Context) error {
-	return w.gh.MergePR(ctx, w.repo.Owner, w.repo.Name, w.pr.Number, w.repo.MergeMethod)
+	err := w.gh.MergePR(ctx, w.repo.Owner, w.repo.Name, w.pr.Number, w.repo.MergeMethod)
+	if err != nil && strings.Contains(err.Error(), "Base branch was modified") {
+		w.logger.Info("base branch modified, updating PR branch")
+		if updateErr := w.gh.UpdateBranch(ctx, w.repo.Owner, w.repo.Name, w.pr.Number); updateErr != nil {
+			return fmt.Errorf("update branch: %w", updateErr)
+		}
+		w.logger.Info("PR branch updated, will retry merge on next poll after checks pass")
+		return nil // Exit successfully, next poll will retry merge
+	}
+	return err
 }

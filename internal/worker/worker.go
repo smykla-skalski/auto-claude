@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"time"
 
 	"github.com/marcin-skalski/auto-claude/internal/claude"
 	"github.com/marcin-skalski/auto-claude/internal/config"
@@ -23,11 +22,6 @@ const (
 	stateReady
 )
 
-const (
-	maxRetriesPerAction = 3
-	baseSleep           = 30 * time.Second
-	maxBackoff          = 5 * time.Minute
-)
 
 type Worker struct {
 	repo   config.RepoConfig
@@ -37,7 +31,6 @@ type Worker struct {
 	git    *git.Client
 	logger *slog.Logger
 
-	retries             map[state]int
 	cachedReviewThreads []github.ReviewThread
 }
 
@@ -49,11 +42,10 @@ func New(repo config.RepoConfig, pr github.PRInfo, gh *github.Client, cl *claude
 		claude: cl,
 		git:    g,
 		logger: logger.With("pr", pr.Number, "repo", repo.Owner+"/"+repo.Name),
-		retries: make(map[state]int),
 	}
 }
 
-// Run is the main worker loop. Blocks until PR is merged, max retries exceeded, or context cancelled.
+// Run evaluates PR once and takes action if needed. Exits after action or if waiting required. Daemon restarts on next poll.
 func (w *Worker) Run(ctx context.Context) error {
 	w.logger.Info("worker started", "title", w.pr.Title, "head", w.pr.HeadRef)
 
@@ -72,104 +64,73 @@ func (w *Worker) Run(ctx context.Context) error {
 		}
 	}()
 
-	consecutiveFailures := 0
-
-	for {
-		select {
-		case <-ctx.Done():
-			w.logger.Info("worker cancelled")
-			return ctx.Err()
-		default:
-		}
-
-		// Refresh PR state
-		pr, err := w.gh.GetPRDetail(ctx, w.repo.Owner, w.repo.Name, w.pr.Number)
-		if err != nil {
-			w.logger.Error("failed to get PR detail", "err", err)
-			consecutiveFailures++
-			w.sleep(ctx, consecutiveFailures)
-			continue
-		}
-		w.pr = *pr
-
-		// Fetch review threads for Copilot review status (only if required)
-		if *w.repo.RequireCopilotReview {
-			threads, err := w.gh.GetReviewThreads(ctx, w.repo.Owner, w.repo.Name, w.pr.Number)
-			if err != nil {
-				w.logger.Error("failed to get review threads", "err", err)
-				consecutiveFailures++
-				w.sleep(ctx, consecutiveFailures)
-				continue
-			}
-			w.cachedReviewThreads = threads
-		}
-
-		s := w.evaluate()
-		w.logger.Info("evaluated state", "state", stateString(s))
-
-		var actionErr error
-		switch s {
-		case stateDraft:
-			w.logger.Info("PR is draft, sleeping")
-			w.sleep(ctx, 0)
-			continue
-
-		case stateConflicting:
-			if w.retries[stateConflicting] >= maxRetriesPerAction {
-				w.logger.Warn("max retries for conflict resolution")
-				return fmt.Errorf("max retries for conflict resolution")
-			}
-			actionErr = w.resolveConflicts(ctx, wtDir)
-			if actionErr != nil {
-				w.retries[stateConflicting]++
-			}
-
-		case stateChecksFailing:
-			if w.retries[stateChecksFailing] >= maxRetriesPerAction {
-				w.logger.Warn("max retries for fixing checks")
-				return fmt.Errorf("max retries for fixing checks")
-			}
-			actionErr = w.fixChecks(ctx, wtDir)
-			if actionErr != nil {
-				w.retries[stateChecksFailing]++
-			}
-
-		case stateReviewsPending:
-			if w.retries[stateReviewsPending] >= maxRetriesPerAction {
-				w.logger.Warn("max retries for fixing reviews")
-				return fmt.Errorf("max retries for fixing reviews")
-			}
-			actionErr = w.fixReviews(ctx, wtDir)
-			if actionErr != nil {
-				w.retries[stateReviewsPending]++
-			}
-
-		case stateChecksPending:
-			w.logger.Info("checks pending, waiting")
-			w.sleep(ctx, 0)
-			continue
-
-		case stateReady:
-			w.logger.Info("PR ready to merge")
-			if err := w.merge(ctx); err != nil {
-				w.logger.Error("merge failed", "err", err)
-				consecutiveFailures++
-				w.sleep(ctx, consecutiveFailures)
-				continue
-			}
-			w.logger.Info("PR merged successfully")
-			return nil
-		}
-
-		if actionErr != nil {
-			w.logger.Error("action failed", "state", stateString(s), "err", actionErr)
-			consecutiveFailures++
-		} else {
-			consecutiveFailures = 0
-		}
-
-		w.sleep(ctx, consecutiveFailures)
+	// Check context before proceeding
+	select {
+	case <-ctx.Done():
+		w.logger.Info("worker cancelled")
+		return ctx.Err()
+	default:
 	}
+
+	// Refresh PR state
+	pr, err := w.gh.GetPRDetail(ctx, w.repo.Owner, w.repo.Name, w.pr.Number)
+	if err != nil {
+		return fmt.Errorf("get PR detail: %w", err)
+	}
+	w.pr = *pr
+
+	// Fetch review threads for Copilot review status (only if required)
+	if *w.repo.RequireCopilotReview {
+		threads, err := w.gh.GetReviewThreads(ctx, w.repo.Owner, w.repo.Name, w.pr.Number)
+		if err != nil {
+			return fmt.Errorf("get review threads: %w", err)
+		}
+		w.cachedReviewThreads = threads
+	}
+
+	s := w.evaluate()
+	w.logger.Info("evaluated state", "state", stateString(s))
+
+	switch s {
+	case stateDraft:
+		w.logger.Info("PR is draft, exiting worker")
+		return nil
+
+	case stateConflicting:
+		if err := w.resolveConflicts(ctx, wtDir); err != nil {
+			return fmt.Errorf("resolve conflicts: %w", err)
+		}
+		w.logger.Info("conflicts resolved, exiting worker")
+		return nil
+
+	case stateChecksFailing:
+		if err := w.fixChecks(ctx, wtDir); err != nil {
+			return fmt.Errorf("fix checks: %w", err)
+		}
+		w.logger.Info("checks fix attempted, exiting worker")
+		return nil
+
+	case stateReviewsPending:
+		if err := w.fixReviews(ctx, wtDir); err != nil {
+			return fmt.Errorf("fix reviews: %w", err)
+		}
+		w.logger.Info("reviews fix attempted, exiting worker")
+		return nil
+
+	case stateChecksPending:
+		w.logger.Info("checks pending, exiting worker")
+		return nil
+
+	case stateReady:
+		w.logger.Info("PR ready to merge")
+		if err := w.merge(ctx); err != nil {
+			return fmt.Errorf("merge: %w", err)
+		}
+		w.logger.Info("PR merged successfully")
+		return nil
+	}
+
+	return nil
 }
 
 func (w *Worker) evaluate() state {
@@ -265,21 +226,6 @@ func isCopilotAuthor(author string) bool {
 	return false
 }
 
-func (w *Worker) sleep(ctx context.Context, failures int) {
-	d := baseSleep
-	if failures > 0 {
-		d = baseSleep * time.Duration(1<<uint(failures))
-		if d > maxBackoff {
-			d = maxBackoff
-		}
-	}
-
-	w.logger.Debug("sleeping", "duration", d)
-	select {
-	case <-ctx.Done():
-	case <-time.After(d):
-	}
-}
 
 func stateString(s state) string {
 	switch s {
