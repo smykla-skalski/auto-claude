@@ -360,6 +360,7 @@ func (d *Daemon) GetSnapshot() tui.Snapshot {
 
 		prStates := make([]tui.PRState, 0, len(prs))
 		repoWorkers := 0
+		blockedCount := 0
 		for _, pr := range prs {
 			wk := workerKey(repo.Owner, repo.Name, pr.Number)
 			hasWorker := workersCopy[wk]
@@ -369,20 +370,29 @@ func (d *Daemon) GetSnapshot() tui.Snapshot {
 
 			hasCopilotReview := copilotCacheCopy[wk]
 			hasUnresolvedCopilot := copilotUnresolvedCacheCopy[wk]
+			states := inferStatesFromPR(pr, *repo.RequireCopilotReview, hasCopilotReview, hasUnresolvedCopilot)
+
+			// Skip blocked PRs (draft, checks pending/failing, copilot pending)
+			if isBlocked(states) {
+				blockedCount++
+				continue
+			}
+
 			prStates = append(prStates, tui.PRState{
 				Number:    pr.Number,
 				Title:     pr.Title,
-				States:    inferStatesFromPR(pr, *repo.RequireCopilotReview, hasCopilotReview, hasUnresolvedCopilot),
+				States:    states,
 				Author:    pr.Author.Login,
 				HasWorker: hasWorker,
 			})
 		}
 
 		repos = append(repos, tui.RepoState{
-			Owner:   repo.Owner,
-			Name:    repo.Name,
-			PRs:     prStates,
-			Workers: repoWorkers,
+			Owner:      repo.Owner,
+			Name:       repo.Name,
+			PRs:        prStates,
+			BlockedPRs: blockedCount,
+			Workers:    repoWorkers,
 		})
 	}
 
@@ -392,6 +402,21 @@ func (d *Daemon) GetSnapshot() tui.Snapshot {
 		ClaudeSessions: sessions,
 		WorkerCount:    workerCount,
 	}
+}
+
+func isBlocked(states []string) bool {
+	blockingStates := map[string]bool{
+		"draft":           true,
+		"checks_pending":  true,
+		"checks_failing":  true,
+		"copilot_pending": true,
+	}
+	for _, s := range states {
+		if blockingStates[s] {
+			return true
+		}
+	}
+	return false
 }
 
 func isCopilotAuthor(author string) bool {

@@ -55,8 +55,12 @@ func renderTree(repos []RepoState) string {
 			prefix = "└─"
 		}
 
-		repoLine := fmt.Sprintf("%s 🔧 %s/%s [%d workers │ %d PRs]",
-			prefix, repo.Owner, repo.Name, repo.Workers, len(repo.PRs))
+		blockedInfo := ""
+		if repo.BlockedPRs > 0 {
+			blockedInfo = fmt.Sprintf(" │ %d blocked", repo.BlockedPRs)
+		}
+		repoLine := fmt.Sprintf("%s 🔧 %s/%s [%d workers │ %d PRs%s]",
+			prefix, repo.Owner, repo.Name, repo.Workers, len(repo.PRs), blockedInfo)
 		b.WriteString(treeRepoStyle.Render(repoLine))
 		b.WriteString("\n")
 

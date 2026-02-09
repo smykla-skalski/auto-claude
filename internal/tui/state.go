@@ -10,10 +10,11 @@ type Snapshot struct {
 }
 
 type RepoState struct {
-	Owner   string
-	Name    string
-	PRs     []PRState
-	Workers int
+	Owner      string
+	Name       string
+	PRs        []PRState
+	BlockedPRs int
+	Workers    int
 }
 
 type PRState struct {
