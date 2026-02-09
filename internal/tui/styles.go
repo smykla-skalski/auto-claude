@@ -28,9 +28,6 @@ var (
 			Bold(true).
 			Foreground(lipgloss.Color("cyan"))
 
-	treePRStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("252"))
-
 	sessionStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("252"))
 
