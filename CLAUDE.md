@@ -105,6 +105,23 @@ Use for local development:
 - Set log level to debug
 - Use separate workdir to avoid conflicts
 
+## Logging
+
+### Colors
+
+Log levels colored when stderr is TTY:
+- DEBUG: gray
+- INFO: cyan
+- WARN: yellow
+- ERROR: red
+
+Auto-disabled when piped or NO_COLOR set.
+
+Disable manually:
+```bash
+NO_COLOR=1 auto-claude --config config.yaml
+```
+
 ## Worker State Machine
 
 Each PR worker progresses through states:

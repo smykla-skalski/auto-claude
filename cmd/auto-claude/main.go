@@ -8,12 +8,15 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"github.com/lmittmann/tint"
 	"github.com/marcin-skalski/auto-claude/internal/claude"
 	"github.com/marcin-skalski/auto-claude/internal/config"
 	"github.com/marcin-skalski/auto-claude/internal/daemon"
 	"github.com/marcin-skalski/auto-claude/internal/git"
 	"github.com/marcin-skalski/auto-claude/internal/github"
+	"github.com/mattn/go-isatty"
 )
 
 func main() {
@@ -57,5 +60,11 @@ func setupLogger(level string) *slog.Logger {
 		lvl = slog.LevelInfo
 	}
 
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: lvl}))
+	noColor := !isatty.IsTerminal(os.Stderr.Fd()) || os.Getenv("NO_COLOR") != ""
+
+	return slog.New(tint.NewHandler(os.Stderr, &tint.Options{
+		Level:      lvl,
+		TimeFormat: time.TimeOnly,
+		NoColor:    noColor,
+	}))
 }
