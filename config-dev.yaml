@@ -9,7 +9,7 @@ repos:
     name: auto-claude
     base_branch: main
     merge_method: squash
-    max_concurrent_prs: 1
+    max_concurrent_prs: 3
 
 log:
   level: debug
