@@ -14,7 +14,7 @@ func (w *Worker) resolveConflicts(ctx context.Context, wtDir string) error {
 	}
 
 	prompt := fmt.Sprintf(
-		"This branch has conflicts with %s. Run `git merge origin/%s`, resolve all conflicts, then `git add . && git commit -s -S -m 'resolve merge conflicts'`.",
+		"This branch has conflicts with %s. Run `git merge origin/%s`, resolve all conflicts, commit with -s -S flags, and push.",
 		w.repo.BaseBranch, w.repo.BaseBranch,
 	)
 
@@ -26,19 +26,19 @@ func (w *Worker) resolveConflicts(ctx context.Context, wtDir string) error {
 		return fmt.Errorf("claude failed: %s", result.Output)
 	}
 
-	// Check if Claude actually created commits
-	hasChanges, err := w.git.HasUnpushedCommits(ctx, wtDir, w.pr.HeadRef)
+	// Validate that Claude pushed changes
+	if err := w.git.Fetch(ctx, wtDir); err != nil {
+		return fmt.Errorf("fetch after resolution: %w", err)
+	}
+
+	hasUnpushed, err := w.git.HasUnpushedCommits(ctx, wtDir, w.pr.HeadRef)
 	if err != nil {
 		return fmt.Errorf("check unpushed commits: %w", err)
 	}
 
-	if !hasChanges {
-		w.logger.Warn("claude completed but created no commits, skipping push")
-		return fmt.Errorf("no commits created")
-	}
-
-	if err := w.git.Push(ctx, wtDir, w.pr.HeadRef); err != nil {
-		return fmt.Errorf("push: %w", err)
+	if hasUnpushed {
+		w.logger.Warn("claude completed but did not push changes")
+		return fmt.Errorf("changes not pushed to remote")
 	}
 
 	w.logger.Info("conflicts resolved and pushed")
@@ -60,7 +60,7 @@ func (w *Worker) fixChecks(ctx context.Context, wtDir string) error {
 	}
 
 	prompt := fmt.Sprintf(
-		"CI checks failing: %s. Investigate failures, fix code, commit with -s -S flags. Run relevant tests locally to verify.",
+		"CI checks failing: %s. Investigate failures, fix code, commit with -s -S flags, run tests locally to verify, and push.",
 		strings.Join(failing, ", "),
 	)
 
@@ -72,19 +72,19 @@ func (w *Worker) fixChecks(ctx context.Context, wtDir string) error {
 		return fmt.Errorf("claude failed: %s", result.Output)
 	}
 
-	// Check if Claude actually created commits
-	hasChanges, err := w.git.HasUnpushedCommits(ctx, wtDir, w.pr.HeadRef)
+	// Validate that Claude pushed changes
+	if err := w.git.Fetch(ctx, wtDir); err != nil {
+		return fmt.Errorf("fetch after fix: %w", err)
+	}
+
+	hasUnpushed, err := w.git.HasUnpushedCommits(ctx, wtDir, w.pr.HeadRef)
 	if err != nil {
 		return fmt.Errorf("check unpushed commits: %w", err)
 	}
 
-	if !hasChanges {
-		w.logger.Warn("claude completed but created no commits, skipping push")
-		return fmt.Errorf("no commits created")
-	}
-
-	if err := w.git.Push(ctx, wtDir, w.pr.HeadRef); err != nil {
-		return fmt.Errorf("push: %w", err)
+	if hasUnpushed {
+		w.logger.Warn("claude completed but did not push changes")
+		return fmt.Errorf("changes not pushed to remote")
 	}
 
 	w.logger.Info("checks fixed and pushed")
@@ -128,20 +128,24 @@ func (w *Worker) fixReviews(ctx context.Context, wtDir string) error {
 		return fmt.Errorf("claude failed: %s", result.Output)
 	}
 
-	// Check if Claude actually created commits
-	hasChanges, err := w.git.HasUnpushedCommits(ctx, wtDir, w.pr.HeadRef)
+	// Validate that changes were pushed (if any were made)
+	if err := w.git.Fetch(ctx, wtDir); err != nil {
+		return fmt.Errorf("fetch after fix: %w", err)
+	}
+
+	hasUnpushed, err := w.git.HasUnpushedCommits(ctx, wtDir, w.pr.HeadRef)
 	if err != nil {
 		return fmt.Errorf("check unpushed commits: %w", err)
 	}
 
-	if !hasChanges {
-		w.logger.Warn("claude completed but created no commits, skipping push and thread resolution")
-		return nil
+	if hasUnpushed {
+		w.logger.Warn("claude completed but did not push changes")
+		return fmt.Errorf("changes not pushed to remote")
 	}
 
-	if err := w.git.Push(ctx, wtDir, w.pr.HeadRef); err != nil {
-		return fmt.Errorf("push: %w", err)
-	}
+	// Check if any commits were actually made
+	// If no commits, skill determined no changes needed - this is OK
+	// Remote is up to date with local, proceed to resolve threads
 
 	// Auto-resolve all Copilot review threads after successful fix
 	w.logger.Info("resolving copilot review threads", "count", len(unresolvedThreads))
