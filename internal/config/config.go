@@ -22,13 +22,13 @@ type ClaudeConfig struct {
 }
 
 type RepoConfig struct {
-	Owner              string   `yaml:"owner"`
-	Name               string   `yaml:"name"`
-	BaseBranch         string   `yaml:"base_branch"`
-	ExcludeAuthors     []string `yaml:"exclude_authors"`
-	MergeMethod        string   `yaml:"merge_method"`
-	MaxConcurrentPRs   int      `yaml:"max_concurrent_prs"`
-	RequireCopilotReview *bool  `yaml:"require_copilot_review,omitempty"`
+	Owner                string   `yaml:"owner"`
+	Name                 string   `yaml:"name"`
+	BaseBranch           string   `yaml:"base_branch"`
+	ExcludeAuthors       []string `yaml:"exclude_authors"`
+	MergeMethod          string   `yaml:"merge_method"`
+	MaxConcurrentPRs     int      `yaml:"max_concurrent_prs"`
+	RequireCopilotReview *bool    `yaml:"require_copilot_review,omitempty"`
 }
 
 type LogConfig struct {

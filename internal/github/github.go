@@ -18,16 +18,16 @@ func NewClient(logger *slog.Logger) *Client {
 }
 
 type PRInfo struct {
-	Number   int     `json:"number"`
-	Title    string  `json:"title"`
-	HeadRef  string  `json:"headRefName"`
-	BaseRef  string  `json:"baseRefName"`
-	URL      string  `json:"url"`
-	IsDraft  bool    `json:"isDraft"`
-	Author   Author  `json:"author"`
-	Mergeable string `json:"mergeable"`
-	MergeStateStatus string `json:"mergeStateStatus"`
-	Checks   []Check `json:"-"`
+	Number            int         `json:"number"`
+	Title             string      `json:"title"`
+	HeadRef           string      `json:"headRefName"`
+	BaseRef           string      `json:"baseRefName"`
+	URL               string      `json:"url"`
+	IsDraft           bool        `json:"isDraft"`
+	Author            Author      `json:"author"`
+	Mergeable         string      `json:"mergeable"`
+	MergeStateStatus  string      `json:"mergeStateStatus"`
+	Checks            []Check     `json:"-"`
 	StatusCheckRollup []checkNode `json:"statusCheckRollup"`
 }
 

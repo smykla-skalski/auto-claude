@@ -29,6 +29,21 @@ const (
 	maxBackoff          = 5 * time.Minute
 )
 
+var (
+	copilotAuthors = map[string]struct{}{
+		"Copilot":                       {},
+		"copilot":                       {},
+		"github-copilot[bot]":           {},
+		"copilot-pull-request-reviewer": {},
+	}
+
+	renovateAuthors = map[string]struct{}{
+		"renovate":       {},
+		"renovate[bot]":  {},
+		"renovate-bot":   {},
+	}
+)
+
 type Worker struct {
 	repo   config.RepoConfig
 	pr     github.PRInfo
@@ -43,12 +58,12 @@ type Worker struct {
 
 func New(repo config.RepoConfig, pr github.PRInfo, gh *github.Client, cl *claude.Client, g *git.Client, logger *slog.Logger) *Worker {
 	return &Worker{
-		repo:   repo,
-		pr:     pr,
-		gh:     gh,
-		claude: cl,
-		git:    g,
-		logger: logger.With("pr", pr.Number, "repo", repo.Owner+"/"+repo.Name),
+		repo:    repo,
+		pr:      pr,
+		gh:      gh,
+		claude:  cl,
+		git:     g,
+		logger:  logger.With("pr", pr.Number, "repo", repo.Owner+"/"+repo.Name),
 		retries: make(map[state]int),
 	}
 }
@@ -92,8 +107,8 @@ func (w *Worker) Run(ctx context.Context) error {
 		}
 		w.pr = *pr
 
-		// Fetch review threads for Copilot review status (only if required)
-		if *w.repo.RequireCopilotReview {
+		// Fetch review threads for Copilot review status (only if required and not Renovate)
+		if *w.repo.RequireCopilotReview && !isRenovateAuthor(w.pr.Author.Login) {
 			threads, err := w.gh.GetReviewThreads(ctx, w.repo.Owner, w.repo.Name, w.pr.Number)
 			if err != nil {
 				w.logger.Error("failed to get review threads", "err", err)
@@ -195,8 +210,8 @@ func (w *Worker) evaluate() state {
 		}
 	}
 
-	// Check Copilot review status before merging (if required)
-	if *w.repo.RequireCopilotReview {
+	// Check Copilot review status before merging (if required and not Renovate)
+	if *w.repo.RequireCopilotReview && !isRenovateAuthor(w.pr.Author.Login) {
 		copilotStatus := w.checkCopilotReviewStatus()
 		switch copilotStatus {
 		case copilotNotReviewed:
@@ -251,18 +266,13 @@ func (w *Worker) checkCopilotReviewStatus() copilotReviewStatus {
 }
 
 func isCopilotAuthor(author string) bool {
-	copilotAuthors := []string{
-		"Copilot",
-		"copilot",
-		"github-copilot[bot]",
-		"copilot-pull-request-reviewer",
-	}
-	for _, ca := range copilotAuthors {
-		if author == ca {
-			return true
-		}
-	}
-	return false
+	_, ok := copilotAuthors[author]
+	return ok
+}
+
+func isRenovateAuthor(author string) bool {
+	_, ok := renovateAuthors[author]
+	return ok
 }
 
 func (w *Worker) sleep(ctx context.Context, failures int) {
