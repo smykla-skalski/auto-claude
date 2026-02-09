@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 )
 
 func renderView(snap Snapshot) string {
@@ -82,8 +83,8 @@ func renderTree(repos []RepoState) string {
 			}
 
 			title := pr.Title
-			if lipgloss.Width(title) > 60 {
-				title = lipgloss.Truncate(title, 57) + "..."
+			if runewidth.StringWidth(title) > 60 {
+				title = runewidth.Truncate(title, 57, "...")
 			}
 
 			// PR title line

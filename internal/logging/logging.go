@@ -108,7 +108,7 @@ func (m *MultiHandler) WithGroup(name string) slog.Handler {
 var fileWriter *lumberjack.Logger
 
 // CloseFile closes the log file writer if it's a lumberjack logger
-func CloseFile(logger *slog.Logger) error {
+func CloseFile() error {
 	if fileWriter != nil {
 		return fileWriter.Close()
 	}

@@ -31,7 +31,8 @@ func main() {
 	}
 
 	// Auto-detect TUI capability
-	enableTUI := !*noTUI && os.Getenv("AUTO_CLAUDE_TUI") != "0" && isatty.IsTerminal(os.Stdout.Fd())
+	enableTUI := !*noTUI && os.Getenv("AUTO_CLAUDE_TUI") != "0" &&
+		isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd())
 
 	logger, err := logging.SetupLogger(cfg.LogFile, cfg.Log.Level, enableTUI)
 	if err != nil {
@@ -50,15 +51,25 @@ func main() {
 
 	if enableTUI {
 		// TUI mode: run daemon in background, TUI in foreground
+		errCh := make(chan error, 1)
 		go func() {
 			logger.Info("auto-claude daemon starting in background", "config", *configPath)
 			if err := d.Run(ctx); err != nil && ctx.Err() == nil {
 				logger.Error("daemon error", "err", err)
+				errCh <- err
 			}
 		}()
 
 		m := tui.NewModel(d, cfg.TUI.RefreshInterval)
 		p := tea.NewProgram(m)
+
+		// Exit if daemon fails immediately
+		go func() {
+			if err := <-errCh; err != nil {
+				p.Send(tea.Quit())
+			}
+		}()
+
 		if _, err := p.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "TUI error: %v\n", err)
 			os.Exit(1)

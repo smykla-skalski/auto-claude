@@ -349,14 +349,14 @@ func (d *Daemon) GetSnapshot() tui.Snapshot {
 		prStates := make([]tui.PRState, 0, len(prs))
 		repoWorkers := 0
 		for _, pr := range prs {
-			key := workerKey(repo.Owner, repo.Name, pr.Number)
-			hasWorker := workersCopy[key]
+			wk := workerKey(repo.Owner, repo.Name, pr.Number)
+			hasWorker := workersCopy[wk]
 			if hasWorker {
 				repoWorkers++
 			}
 
-			hasCopilotReview := copilotCacheCopy[key]
-			hasUnresolvedCopilot := copilotUnresolvedCacheCopy[key]
+			hasCopilotReview := copilotCacheCopy[wk]
+			hasUnresolvedCopilot := copilotUnresolvedCacheCopy[wk]
 			prStates = append(prStates, tui.PRState{
 				Number:    pr.Number,
 				Title:     pr.Title,
