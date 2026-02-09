@@ -1,5 +1,6 @@
 poll_interval: 60s
 workdir: /tmp/auto-claude
+log_file: /tmp/auto-claude/logs/auto-claude.log  # Log file path (default: {workdir}/logs/auto-claude.log)
 
 claude:
   model: opus
@@ -16,3 +17,6 @@ repos:
 
 log:
   level: info
+
+tui:
+  refresh_interval: 3s  # How often to refresh TUI display (default: 3s)

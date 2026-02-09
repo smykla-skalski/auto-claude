@@ -11,6 +11,7 @@ import (
 	"github.com/marcin-skalski/auto-claude/internal/config"
 	"github.com/marcin-skalski/auto-claude/internal/git"
 	"github.com/marcin-skalski/auto-claude/internal/github"
+	"github.com/marcin-skalski/auto-claude/internal/tui"
 	"github.com/marcin-skalski/auto-claude/internal/worker"
 )
 
@@ -34,6 +35,9 @@ type Daemon struct {
 
 	sessionsMu     sync.Mutex
 	claudeSessions map[string]*claudeSession
+
+	prCacheMu sync.Mutex
+	prCache   map[string][]github.PRInfo // key: owner/repo
 }
 
 func New(cfg *config.Config, gh *github.Client, cl *claude.Client, g *git.Client, logger *slog.Logger) *Daemon {
@@ -45,6 +49,7 @@ func New(cfg *config.Config, gh *github.Client, cl *claude.Client, g *git.Client
 		logger:         logger,
 		workers:        make(map[string]context.CancelFunc),
 		claudeSessions: make(map[string]*claudeSession),
+		prCache:        make(map[string][]github.PRInfo),
 	}
 }
 
@@ -90,7 +95,13 @@ func (d *Daemon) pollRepo(ctx context.Context, repo config.RepoConfig) error {
 		return fmt.Errorf("list PRs: %w", err)
 	}
 
-	d.logger.Info("polled repo", "repo", repo.Owner+"/"+repo.Name, "open_prs", len(prs))
+	// Cache PR data for TUI snapshot
+	repoKey := repo.Owner + "/" + repo.Name
+	d.prCacheMu.Lock()
+	d.prCache[repoKey] = prs
+	d.prCacheMu.Unlock()
+
+	d.logger.Info("polled repo", "repo", repoKey, "open_prs", len(prs))
 
 	// Track which PRs are still open
 	openKeys := make(map[string]bool)
@@ -254,4 +265,97 @@ func (d *Daemon) logClaudeStatus() {
 			"action", s.action,
 			"duration", duration)
 	}
+}
+
+func (d *Daemon) GetSnapshot() tui.Snapshot {
+	d.mu.Lock()
+	workersCopy := make(map[string]bool, len(d.workers))
+	for k := range d.workers {
+		workersCopy[k] = true
+	}
+	workerCount := len(d.workers)
+	d.mu.Unlock()
+
+	d.sessionsMu.Lock()
+	sessions := make([]tui.ClaudeSessionState, 0, len(d.claudeSessions))
+	for _, s := range d.claudeSessions {
+		sessions = append(sessions, tui.ClaudeSessionState{
+			Repo:     s.repo,
+			PRNumber: s.prNumber,
+			Action:   s.action,
+			Duration: time.Since(s.started).Round(time.Second),
+		})
+	}
+	d.sessionsMu.Unlock()
+
+	d.prCacheMu.Lock()
+	prCacheCopy := make(map[string][]github.PRInfo, len(d.prCache))
+	for k, v := range d.prCache {
+		prCacheCopy[k] = append([]github.PRInfo(nil), v...)
+	}
+	d.prCacheMu.Unlock()
+
+	repos := make([]tui.RepoState, 0, len(d.cfg.Repos))
+	for _, repo := range d.cfg.Repos {
+		repoKey := repo.Owner + "/" + repo.Name
+		prs, ok := prCacheCopy[repoKey]
+		if !ok {
+			prs = []github.PRInfo{}
+		}
+
+		prStates := make([]tui.PRState, 0, len(prs))
+		repoWorkers := 0
+		for _, pr := range prs {
+			workerKey := workerKey(repo.Owner, repo.Name, pr.Number)
+			hasWorker := workersCopy[workerKey]
+			if hasWorker {
+				repoWorkers++
+			}
+
+			prStates = append(prStates, tui.PRState{
+				Number:    pr.Number,
+				Title:     pr.Title,
+				State:     inferStateFromPR(pr),
+				Author:    pr.Author.Login,
+				HasWorker: hasWorker,
+			})
+		}
+
+		repos = append(repos, tui.RepoState{
+			Owner:   repo.Owner,
+			Name:    repo.Name,
+			PRs:     prStates,
+			Workers: repoWorkers,
+		})
+	}
+
+	return tui.Snapshot{
+		Timestamp:      time.Now(),
+		Repos:          repos,
+		ClaudeSessions: sessions,
+		WorkerCount:    workerCount,
+	}
+}
+
+func inferStateFromPR(pr github.PRInfo) string {
+	if pr.IsDraft {
+		return "draft"
+	}
+	if pr.Mergeable == "CONFLICTING" {
+		return "conflicting"
+	}
+	for _, c := range pr.Checks {
+		if c.Conclusion == "failure" {
+			return "checks_failing"
+		}
+	}
+	for _, c := range pr.Checks {
+		if c.Conclusion == "" && c.Status != "COMPLETED" {
+			return "checks_pending"
+		}
+	}
+	if pr.MergeStateStatus == "BLOCKED" {
+		return "reviews_pending"
+	}
+	return "ready"
 }

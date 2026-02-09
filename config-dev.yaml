@@ -1,5 +1,6 @@
 poll_interval: 30s
 workdir: /tmp/auto-claude-dev
+log_file: /tmp/auto-claude-dev/logs/auto-claude.log
 
 claude:
   model: sonnet
@@ -14,3 +15,6 @@ repos:
 
 log:
   level: debug
+
+tui:
+  refresh_interval: 3s

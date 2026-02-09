@@ -4,23 +4,24 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
-	"github.com/lmittmann/tint"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/marcin-skalski/auto-claude/internal/claude"
 	"github.com/marcin-skalski/auto-claude/internal/config"
 	"github.com/marcin-skalski/auto-claude/internal/daemon"
 	"github.com/marcin-skalski/auto-claude/internal/git"
 	"github.com/marcin-skalski/auto-claude/internal/github"
+	"github.com/marcin-skalski/auto-claude/internal/logging"
+	"github.com/marcin-skalski/auto-claude/internal/tui"
 	"github.com/mattn/go-isatty"
 )
 
 func main() {
 	configPath := flag.String("config", "config.yaml", "path to config file")
+	noTUI := flag.Bool("no-tui", false, "disable TUI mode")
 	flag.Parse()
 
 	cfg, err := config.Load(*configPath)
@@ -29,7 +30,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	logger := setupLogger(cfg.Log.Level)
+	// Auto-detect TUI capability
+	enableTUI := !*noTUI && os.Getenv("AUTO_CLAUDE_TUI") != "0" && isatty.IsTerminal(os.Stdout.Fd())
+
+	logger, err := logging.SetupLogger(cfg.LogFile, cfg.Log.Level, enableTUI)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "setup logger: %v\n", err)
+		os.Exit(1)
+	}
 
 	gh := github.NewClient(logger)
 	cl := claude.NewClient(cfg.Claude.Model, logger)
@@ -40,31 +48,27 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	logger.Info("auto-claude starting", "config", *configPath)
-	if err := d.Run(ctx); err != nil {
-		logger.Error("daemon error", "err", err)
-		os.Exit(1)
+	if enableTUI {
+		// TUI mode: run daemon in background, TUI in foreground
+		go func() {
+			logger.Info("auto-claude daemon starting in background", "config", *configPath)
+			if err := d.Run(ctx); err != nil && ctx.Err() == nil {
+				logger.Error("daemon error", "err", err)
+			}
+		}()
+
+		m := tui.NewModel(d, cfg.TUI.RefreshInterval)
+		p := tea.NewProgram(m)
+		if _, err := p.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "TUI error: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		// Headless mode
+		logger.Info("auto-claude starting (headless)", "config", *configPath)
+		if err := d.Run(ctx); err != nil {
+			logger.Error("daemon error", "err", err)
+			os.Exit(1)
+		}
 	}
-}
-
-func setupLogger(level string) *slog.Logger {
-	var lvl slog.Level
-	switch level {
-	case "debug":
-		lvl = slog.LevelDebug
-	case "warn":
-		lvl = slog.LevelWarn
-	case "error":
-		lvl = slog.LevelError
-	default:
-		lvl = slog.LevelInfo
-	}
-
-	noColor := !isatty.IsTerminal(os.Stderr.Fd()) || os.Getenv("NO_COLOR") != ""
-
-	return slog.New(tint.NewHandler(os.Stderr, &tint.Options{
-		Level:      lvl,
-		TimeFormat: time.TimeOnly,
-		NoColor:    noColor,
-	}))
 }

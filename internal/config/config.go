@@ -12,9 +12,11 @@ type Config struct {
 	PollInterval time.Duration `yaml:"-"`
 	RawInterval  string        `yaml:"poll_interval"`
 	Workdir      string        `yaml:"workdir"`
+	LogFile      string        `yaml:"log_file"`
 	Claude       ClaudeConfig  `yaml:"claude"`
 	Repos        []RepoConfig  `yaml:"repos"`
 	Log          LogConfig     `yaml:"log"`
+	TUI          TUIConfig     `yaml:"tui"`
 }
 
 type ClaudeConfig struct {
@@ -33,6 +35,11 @@ type RepoConfig struct {
 
 type LogConfig struct {
 	Level string `yaml:"level"`
+}
+
+type TUIConfig struct {
+	RefreshInterval time.Duration `yaml:"-"`
+	RawInterval     string        `yaml:"refresh_interval"`
 }
 
 func Load(path string) (*Config, error) {
@@ -70,12 +77,24 @@ func (c *Config) setDefaults() error {
 	if c.Workdir == "" {
 		c.Workdir = "/tmp/auto-claude"
 	}
+	if c.LogFile == "" {
+		c.LogFile = c.Workdir + "/logs/auto-claude.log"
+	}
 	if c.Claude.Model == "" {
 		c.Claude.Model = "opus"
 	}
 	if c.Log.Level == "" {
 		c.Log.Level = "info"
 	}
+
+	if c.TUI.RawInterval == "" {
+		c.TUI.RawInterval = "3s"
+	}
+	tuiInterval, err := time.ParseDuration(c.TUI.RawInterval)
+	if err != nil {
+		return fmt.Errorf("parse tui.refresh_interval %q: %w", c.TUI.RawInterval, err)
+	}
+	c.TUI.RefreshInterval = tuiInterval
 
 	for i := range c.Repos {
 		if c.Repos[i].BaseBranch == "" {
