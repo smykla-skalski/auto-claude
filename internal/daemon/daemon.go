@@ -158,14 +158,7 @@ func (d *Daemon) pollRepo(ctx context.Context, repo config.RepoConfig) error {
 		}
 
 		// Skip blocked/on-hold PRs at poll level
-		hasBlockingLabel := false
-		for _, label := range pr.Labels {
-			if label.Name == "blocked" || label.Name == "on-hold" {
-				hasBlockingLabel = true
-				break
-			}
-		}
-		if hasBlockingLabel {
+		if hasBlockingLabel(pr) {
 			continue
 		}
 
@@ -402,22 +395,28 @@ func (d *Daemon) GetSnapshot() tui.Snapshot {
 	}
 }
 
+var blockingLabels = map[string]bool{
+	"blocked": true,
+	"on-hold": true,
+}
+
 func hasBlockingLabel(pr github.PRInfo) bool {
 	for _, label := range pr.Labels {
-		if label.Name == "blocked" || label.Name == "on-hold" {
+		if blockingLabels[label.Name] {
 			return true
 		}
 	}
 	return false
 }
 
+var copilotAuthors = map[string]bool{
+	"Copilot":                       true,
+	"copilot":                       true,
+	"github-copilot[bot]":           true,
+	"copilot-pull-request-reviewer": true,
+}
+
 func isCopilotAuthor(author string) bool {
-	copilotAuthors := map[string]bool{
-		"Copilot":                       true,
-		"copilot":                       true,
-		"github-copilot[bot]":           true,
-		"copilot-pull-request-reviewer": true,
-	}
 	return copilotAuthors[author]
 }
 
