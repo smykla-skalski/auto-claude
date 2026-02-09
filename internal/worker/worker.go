@@ -37,7 +37,8 @@ type Worker struct {
 	git    *git.Client
 	logger *slog.Logger
 
-	retries map[state]int
+	retries             map[state]int
+	cachedReviewThreads []github.ReviewThread
 }
 
 func New(repo config.RepoConfig, pr github.PRInfo, gh *github.Client, cl *claude.Client, g *git.Client, logger *slog.Logger) *Worker {
@@ -90,6 +91,18 @@ func (w *Worker) Run(ctx context.Context) error {
 			continue
 		}
 		w.pr = *pr
+
+		// Fetch review threads for Copilot review status (only if required)
+		if *w.repo.RequireCopilotReview {
+			threads, err := w.gh.GetReviewThreads(ctx, w.repo.Owner, w.repo.Name, w.pr.Number)
+			if err != nil {
+				w.logger.Error("failed to get review threads", "err", err)
+				consecutiveFailures++
+				w.sleep(ctx, consecutiveFailures)
+				continue
+			}
+			w.cachedReviewThreads = threads
+		}
 
 		s := w.evaluate()
 		w.logger.Info("evaluated state", "state", stateString(s))
@@ -175,10 +188,6 @@ func (w *Worker) evaluate() state {
 		}
 	}
 
-	// Check for unresolved copilot reviews (done async via GetReviewThreads in fixReviews)
-	// We check mergeStateStatus for BLOCKED which may indicate review requirements
-	// but copilot reviews need explicit thread check, handled in action
-
 	// Check for pending checks
 	for _, c := range w.pr.Checks {
 		if c.Conclusion == "" && c.Status != "COMPLETED" {
@@ -186,12 +195,74 @@ func (w *Worker) evaluate() state {
 		}
 	}
 
-	// If merge state is blocked, could be reviews
+	// Check Copilot review status before merging (if required)
+	if *w.repo.RequireCopilotReview {
+		copilotStatus := w.checkCopilotReviewStatus()
+		switch copilotStatus {
+		case copilotNotReviewed:
+			w.logger.Info("waiting for Copilot review to complete")
+			return stateChecksPending
+		case copilotUnresolved:
+			return stateReviewsPending
+		case copilotResolved:
+			// Continue to merge readiness check
+		}
+	}
+
+	// If merge state is blocked, could be other review requirements
 	if w.pr.MergeStateStatus == "BLOCKED" {
 		return stateReviewsPending
 	}
 
 	return stateReady
+}
+
+type copilotReviewStatus int
+
+const (
+	copilotNotReviewed copilotReviewStatus = iota
+	copilotUnresolved
+	copilotResolved
+)
+
+func (w *Worker) checkCopilotReviewStatus() copilotReviewStatus {
+	var hasCopilotComment bool
+	var hasUnresolvedComment bool
+
+	for _, t := range w.cachedReviewThreads {
+		for _, c := range t.Comments {
+			if isCopilotAuthor(c.Author) {
+				hasCopilotComment = true
+				if !t.IsResolved && !t.IsOutdated {
+					hasUnresolvedComment = true
+				}
+				break
+			}
+		}
+	}
+
+	if !hasCopilotComment {
+		return copilotNotReviewed
+	}
+	if hasUnresolvedComment {
+		return copilotUnresolved
+	}
+	return copilotResolved
+}
+
+func isCopilotAuthor(author string) bool {
+	copilotAuthors := []string{
+		"Copilot",
+		"copilot",
+		"github-copilot[bot]",
+		"copilot-pull-request-reviewer",
+	}
+	for _, ca := range copilotAuthors {
+		if author == ca {
+			return true
+		}
+	}
+	return false
 }
 
 func (w *Worker) sleep(ctx context.Context, failures int) {
