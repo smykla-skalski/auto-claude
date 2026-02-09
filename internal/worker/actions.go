@@ -3,6 +3,10 @@ package worker
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -109,6 +113,50 @@ func (w *Worker) fixChecks(ctx context.Context, wtDir string) error {
 	return nil
 }
 
+type reviewFixSummary struct {
+	Total        int
+	Applied      int
+	Questionable int
+	Invalid      int
+}
+
+func parseReviewFixSummary(output string) (*reviewFixSummary, error) {
+	// Expected format:
+	// Summary: Fixed N/M unresolved review comments
+	// Applied:
+	// ✓ N valid fixes across K files
+	// Skipped:
+	// ? X questionable
+	// ✗ Y invalid
+
+	summary := &reviewFixSummary{}
+
+	// Parse "Fixed N/M unresolved review comments"
+	summaryRe := regexp.MustCompile(`Fixed (\d+)/(\d+) unresolved review comments`)
+	if matches := summaryRe.FindStringSubmatch(output); len(matches) == 3 {
+		applied, _ := strconv.Atoi(matches[1])
+		total, _ := strconv.Atoi(matches[2])
+		summary.Applied = applied
+		summary.Total = total
+	} else {
+		return nil, fmt.Errorf("could not parse summary line")
+	}
+
+	// Parse "? X questionable"
+	questionableRe := regexp.MustCompile(`\? (\d+) questionable`)
+	if matches := questionableRe.FindStringSubmatch(output); len(matches) == 2 {
+		summary.Questionable, _ = strconv.Atoi(matches[1])
+	}
+
+	// Parse "✗ Y invalid"
+	invalidRe := regexp.MustCompile(`✗ (\d+) invalid`)
+	if matches := invalidRe.FindStringSubmatch(output); len(matches) == 2 {
+		summary.Invalid, _ = strconv.Atoi(matches[1])
+	}
+
+	return summary, nil
+}
+
 func (w *Worker) fixReviews(ctx context.Context, wtDir string) error {
 	w.logger.Info("fixing review comments")
 
@@ -137,6 +185,12 @@ func (w *Worker) fixReviews(ctx context.Context, wtDir string) error {
 		return fmt.Errorf("fetch: %w", err)
 	}
 
+	// Create output directory for Claude logs
+	outputDir := filepath.Join(wtDir, ".auto-claude-logs")
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return fmt.Errorf("create output dir: %w", err)
+	}
+
 	w.onClaudeStart("fixing_reviews")
 	endCalled := false
 	defer func() {
@@ -146,7 +200,7 @@ func (w *Worker) fixReviews(ctx context.Context, wtDir string) error {
 	}()
 
 	prURL := fmt.Sprintf("https://github.com/%s/%s/pull/%d", w.repo.Owner, w.repo.Name, w.pr.Number)
-	result, err := w.claude.RunCommand(ctx, wtDir, "fix-review-auto", prURL)
+	result, err := w.claude.RunCommand(ctx, wtDir, outputDir, "fix-review-auto", prURL)
 	w.onClaudeEnd()
 	endCalled = true
 	if err != nil {
@@ -156,6 +210,16 @@ func (w *Worker) fixReviews(ctx context.Context, wtDir string) error {
 		return fmt.Errorf("claude failed: %s", result.Output)
 	}
 
+	// Parse summary to understand what was done
+	summary, parseErr := parseReviewFixSummary(result.Output)
+	if parseErr == nil {
+		w.logger.Info("review fix summary",
+			"total", summary.Total,
+			"applied", summary.Applied,
+			"questionable", summary.Questionable,
+			"invalid", summary.Invalid)
+	}
+
 	// Check if Claude actually created commits
 	hasChanges, err := w.git.HasUnpushedCommits(ctx, wtDir, w.pr.HeadRef)
 	if err != nil {
@@ -163,6 +227,21 @@ func (w *Worker) fixReviews(ctx context.Context, wtDir string) error {
 	}
 
 	if !hasChanges {
+		if parseErr == nil && summary.Applied == 0 {
+			// Legitimate: all comments were skipped
+			w.logger.Info("no fixes applied - all comments skipped",
+				"total", summary.Total,
+				"questionable", summary.Questionable,
+				"invalid", summary.Invalid)
+			return nil // Success, not error
+		}
+		// Unexpected: skill should have created commits
+		if parseErr == nil {
+			w.logger.Error("no commits but fixes claimed",
+				"claimed_fixes", summary.Applied)
+			return fmt.Errorf("no commits created despite claiming %d fixes", summary.Applied)
+		}
+		// Parse failed, unclear what happened
 		return fmt.Errorf("no commits created by claude, cannot push")
 	}
 
