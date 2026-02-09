@@ -8,6 +8,7 @@ var (
 	colorConflicting    = lipgloss.Color("220") // yellow
 	colorChecksFailing  = lipgloss.Color("196") // red
 	colorChecksPending  = lipgloss.Color("33")  // blue
+	colorCopilotPending = lipgloss.Color("135") // purple
 	colorReviewsPending = lipgloss.Color("214") // orange
 	colorReady          = lipgloss.Color("46")  // green
 
@@ -54,6 +55,8 @@ func stateIcon(state string) string {
 		return "🔨"
 	case "checks_pending":
 		return "⚙️"
+	case "copilot_pending":
+		return "🤖"
 	case "reviews_pending":
 		return "📋"
 	case "ready":
@@ -73,6 +76,8 @@ func stateColor(state string) lipgloss.Color {
 		return colorChecksFailing
 	case "checks_pending":
 		return colorChecksPending
+	case "copilot_pending":
+		return colorCopilotPending
 	case "reviews_pending":
 		return colorReviewsPending
 	case "ready":

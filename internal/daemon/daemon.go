@@ -36,20 +36,22 @@ type Daemon struct {
 	sessionsMu     sync.Mutex
 	claudeSessions map[string]*claudeSession
 
-	prCacheMu sync.Mutex
-	prCache   map[string][]github.PRInfo // key: owner/repo
+	prCacheMu          sync.Mutex
+	prCache            map[string][]github.PRInfo // key: owner/repo
+	copilotReviewCache map[string]bool            // key: owner/repo#number, value: has completed Copilot review
 }
 
 func New(cfg *config.Config, gh *github.Client, cl *claude.Client, g *git.Client, logger *slog.Logger) *Daemon {
 	return &Daemon{
-		cfg:            cfg,
-		gh:             gh,
-		claude:         cl,
-		git:            g,
-		logger:         logger,
-		workers:        make(map[string]context.CancelFunc),
-		claudeSessions: make(map[string]*claudeSession),
-		prCache:        make(map[string][]github.PRInfo),
+		cfg:                cfg,
+		gh:                 gh,
+		claude:             cl,
+		git:                g,
+		logger:             logger,
+		workers:            make(map[string]context.CancelFunc),
+		claudeSessions:     make(map[string]*claudeSession),
+		prCache:            make(map[string][]github.PRInfo),
+		copilotReviewCache: make(map[string]bool),
 	}
 }
 
@@ -99,6 +101,17 @@ func (d *Daemon) pollRepo(ctx context.Context, repo config.RepoConfig) error {
 	repoKey := repo.Owner + "/" + repo.Name
 	d.prCacheMu.Lock()
 	d.prCache[repoKey] = prs
+
+	// Cache Copilot review status for each PR if required
+	if *repo.RequireCopilotReview {
+		for _, pr := range prs {
+			prKey := workerKey(repo.Owner, repo.Name, pr.Number)
+			// Quick check: if MergeStateStatus is not BLOCKED and checks pass, Copilot reviewed
+			// This is a heuristic - actual check happens in worker
+			hasCopilotReview := pr.MergeStateStatus != "BLOCKED" || pr.IsDraft
+			d.copilotReviewCache[prKey] = hasCopilotReview
+		}
+	}
 	d.prCacheMu.Unlock()
 
 	d.logger.Info("polled repo", "repo", repoKey, "open_prs", len(prs))
@@ -293,6 +306,10 @@ func (d *Daemon) GetSnapshot() tui.Snapshot {
 	for k, v := range d.prCache {
 		prCacheCopy[k] = append([]github.PRInfo(nil), v...)
 	}
+	copilotCacheCopy := make(map[string]bool, len(d.copilotReviewCache))
+	for k, v := range d.copilotReviewCache {
+		copilotCacheCopy[k] = v
+	}
 	d.prCacheMu.Unlock()
 
 	repos := make([]tui.RepoState, 0, len(d.cfg.Repos))
@@ -306,16 +323,17 @@ func (d *Daemon) GetSnapshot() tui.Snapshot {
 		prStates := make([]tui.PRState, 0, len(prs))
 		repoWorkers := 0
 		for _, pr := range prs {
-			workerKey := workerKey(repo.Owner, repo.Name, pr.Number)
-			hasWorker := workersCopy[workerKey]
+			key := workerKey(repo.Owner, repo.Name, pr.Number)
+			hasWorker := workersCopy[key]
 			if hasWorker {
 				repoWorkers++
 			}
 
+			hasCopilotReview := copilotCacheCopy[key]
 			prStates = append(prStates, tui.PRState{
 				Number:    pr.Number,
 				Title:     pr.Title,
-				State:     inferStateFromPR(pr),
+				State:     inferStateFromPR(pr, *repo.RequireCopilotReview, hasCopilotReview),
 				Author:    pr.Author.Login,
 				HasWorker: hasWorker,
 			})
@@ -337,7 +355,7 @@ func (d *Daemon) GetSnapshot() tui.Snapshot {
 	}
 }
 
-func inferStateFromPR(pr github.PRInfo) string {
+func inferStateFromPR(pr github.PRInfo, requireCopilot bool, hasCopilotReview bool) string {
 	if pr.IsDraft {
 		return "draft"
 	}
@@ -354,6 +372,12 @@ func inferStateFromPR(pr github.PRInfo) string {
 			return "checks_pending"
 		}
 	}
+
+	// Check for Copilot review if required
+	if requireCopilot && !hasCopilotReview {
+		return "copilot_pending"
+	}
+
 	if pr.MergeStateStatus == "BLOCKED" {
 		return "reviews_pending"
 	}
