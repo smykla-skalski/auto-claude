@@ -79,7 +79,7 @@ func (w *Worker) fixReviews(ctx context.Context, wtDir string) error {
 			continue
 		}
 		for _, c := range t.Comments {
-			if c.Author == "copilot" || c.Author == "github-copilot[bot]" {
+			if isCopilotAuthor(c.Author) {
 				unresolvedCount++
 				break
 			}

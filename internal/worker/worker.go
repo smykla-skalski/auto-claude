@@ -229,7 +229,7 @@ func (w *Worker) checkCopilotReviewStatus() copilotReviewStatus {
 
 	for _, t := range w.cachedReviewThreads {
 		for _, c := range t.Comments {
-			if c.Author == "copilot" || c.Author == "github-copilot[bot]" {
+			if isCopilotAuthor(c.Author) {
 				hasCopilotComment = true
 				if !t.IsResolved && !t.IsOutdated {
 					hasUnresolvedComment = true
@@ -246,6 +246,21 @@ func (w *Worker) checkCopilotReviewStatus() copilotReviewStatus {
 		return copilotUnresolved
 	}
 	return copilotResolved
+}
+
+func isCopilotAuthor(author string) bool {
+	copilotAuthors := []string{
+		"Copilot",
+		"copilot",
+		"github-copilot[bot]",
+		"copilot-pull-request-reviewer",
+	}
+	for _, ca := range copilotAuthors {
+		if author == ca {
+			return true
+		}
+	}
+	return false
 }
 
 func (w *Worker) sleep(ctx context.Context, failures int) {
