@@ -106,9 +106,27 @@ func (d *Daemon) pollRepo(ctx context.Context, repo config.RepoConfig) error {
 	if *repo.RequireCopilotReview {
 		for _, pr := range prs {
 			prKey := workerKey(repo.Owner, repo.Name, pr.Number)
-			// Quick check: if MergeStateStatus is not BLOCKED and checks pass, Copilot reviewed
-			// This is a heuristic - actual check happens in worker
-			hasCopilotReview := pr.MergeStateStatus != "BLOCKED" || pr.IsDraft
+
+			// Fetch review threads to check Copilot status
+			hasCopilotReview := false
+			threads, err := d.gh.GetReviewThreads(ctx, repo.Owner, repo.Name, pr.Number)
+			if err == nil {
+				// Check if Copilot has commented
+				hasCopilotComment := false
+				for _, t := range threads {
+					for _, c := range t.Comments {
+						if isCopilotAuthor(c.Author) {
+							hasCopilotComment = true
+							break
+						}
+					}
+					if hasCopilotComment {
+						break
+					}
+				}
+				hasCopilotReview = hasCopilotComment
+			}
+
 			d.copilotReviewCache[prKey] = hasCopilotReview
 		}
 	}
@@ -353,6 +371,16 @@ func (d *Daemon) GetSnapshot() tui.Snapshot {
 		ClaudeSessions: sessions,
 		WorkerCount:    workerCount,
 	}
+}
+
+func isCopilotAuthor(author string) bool {
+	copilotAuthors := map[string]bool{
+		"Copilot":                       true,
+		"copilot":                       true,
+		"github-copilot[bot]":           true,
+		"copilot-pull-request-reviewer": true,
+	}
+	return copilotAuthors[author]
 }
 
 func inferStateFromPR(pr github.PRInfo, requireCopilot bool, hasCopilotReview bool) string {
