@@ -395,9 +395,14 @@ func (d *Daemon) GetSnapshot() tui.Snapshot {
 	}
 }
 
+var blockingLabels = map[string]bool{
+	"blocked": true,
+	"on-hold": true,
+}
+
 func hasBlockingLabel(pr github.PRInfo) bool {
 	for _, label := range pr.Labels {
-		if label.Name == "blocked" || label.Name == "on-hold" {
+		if blockingLabels[label.Name] {
 			return true
 		}
 	}
