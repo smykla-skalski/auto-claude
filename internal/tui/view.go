@@ -92,23 +92,32 @@ func renderTree(repos []RepoState) string {
 			b.WriteString(treePRStyle.Render(prLine))
 			b.WriteString("\n")
 
-			// Status line (nested under PR)
-			icon := stateIcon(pr.State)
-			color := stateColor(pr.State)
+			// Status lines (nested under PR)
+			for k, state := range pr.States {
+				isLastState := k == len(pr.States)-1
+				icon := stateIcon(state)
+				color := stateColor(state)
 
-			claudeIndicator := ""
-			if pr.HasWorker {
-				claudeIndicator = " (Claude)"
-			}
+				claudeIndicator := ""
+				if pr.HasWorker && isLastState {
+					claudeIndicator = " (Claude)"
+				}
 
-			statusPrefix := childPrefix
-			if isPRLast {
-				statusPrefix = childPrefix
+				statusPrefix := childPrefix
+				if isPRLast {
+					statusPrefix = childPrefix
+				}
+
+				statePrefix := "├─"
+				if isLastState {
+					statePrefix = "└─"
+				}
+
+				statusLine := fmt.Sprintf("%s   %s %s %s%s",
+					statusPrefix, statePrefix, icon, state, claudeIndicator)
+				b.WriteString(lipgloss.NewStyle().Foreground(color).Render(statusLine))
+				b.WriteString("\n")
 			}
-			statusLine := fmt.Sprintf("%s   └─ %s %s%s",
-				statusPrefix, icon, pr.State, claudeIndicator)
-			b.WriteString(lipgloss.NewStyle().Foreground(color).Render(statusLine))
-			b.WriteString("\n")
 		}
 	}
 

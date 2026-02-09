@@ -19,7 +19,7 @@ type RepoState struct {
 type PRState struct {
 	Number    int
 	Title     string
-	State     string // draft|conflicting|checks_failing|checks_pending|reviews_pending|ready
+	States    []string // draft|conflicting|checks_failing|checks_pending|copilot_pending|reviews_pending|ready
 	Author    string
 	HasWorker bool
 }

@@ -351,7 +351,7 @@ func (d *Daemon) GetSnapshot() tui.Snapshot {
 			prStates = append(prStates, tui.PRState{
 				Number:    pr.Number,
 				Title:     pr.Title,
-				State:     inferStateFromPR(pr, *repo.RequireCopilotReview, hasCopilotReview),
+				States:    inferStatesFromPR(pr, *repo.RequireCopilotReview, hasCopilotReview),
 				Author:    pr.Author.Login,
 				HasWorker: hasWorker,
 			})
@@ -383,31 +383,47 @@ func isCopilotAuthor(author string) bool {
 	return copilotAuthors[author]
 }
 
-func inferStateFromPR(pr github.PRInfo, requireCopilot bool, hasCopilotReview bool) string {
+func inferStatesFromPR(pr github.PRInfo, requireCopilot bool, hasCopilotReview bool) []string {
+	var states []string
+
 	if pr.IsDraft {
-		return "draft"
+		return []string{"draft"}
 	}
+
 	if pr.Mergeable == "CONFLICTING" {
-		return "conflicting"
+		states = append(states, "conflicting")
 	}
+
+	hasFailingChecks := false
+	hasPendingChecks := false
 	for _, c := range pr.Checks {
 		if c.Conclusion == "failure" {
-			return "checks_failing"
+			hasFailingChecks = true
+		}
+		if c.Conclusion == "" && c.Status != "COMPLETED" {
+			hasPendingChecks = true
 		}
 	}
-	for _, c := range pr.Checks {
-		if c.Conclusion == "" && c.Status != "COMPLETED" {
-			return "checks_pending"
-		}
+
+	if hasFailingChecks {
+		states = append(states, "checks_failing")
+	}
+	if hasPendingChecks {
+		states = append(states, "checks_pending")
 	}
 
 	// Check for Copilot review if required
 	if requireCopilot && !hasCopilotReview {
-		return "copilot_pending"
+		states = append(states, "copilot_pending")
 	}
 
 	if pr.MergeStateStatus == "BLOCKED" {
-		return "reviews_pending"
+		states = append(states, "reviews_pending")
 	}
-	return "ready"
+
+	if len(states) == 0 {
+		states = append(states, "ready")
+	}
+
+	return states
 }
