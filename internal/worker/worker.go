@@ -92,15 +92,17 @@ func (w *Worker) Run(ctx context.Context) error {
 		}
 		w.pr = *pr
 
-		// Fetch review threads for Copilot review status
-		threads, err := w.gh.GetReviewThreads(ctx, w.repo.Owner, w.repo.Name, w.pr.Number)
-		if err != nil {
-			w.logger.Error("failed to get review threads", "err", err)
-			consecutiveFailures++
-			w.sleep(ctx, consecutiveFailures)
-			continue
+		// Fetch review threads for Copilot review status (only if required)
+		if *w.repo.RequireCopilotReview {
+			threads, err := w.gh.GetReviewThreads(ctx, w.repo.Owner, w.repo.Name, w.pr.Number)
+			if err != nil {
+				w.logger.Error("failed to get review threads", "err", err)
+				consecutiveFailures++
+				w.sleep(ctx, consecutiveFailures)
+				continue
+			}
+			w.cachedReviewThreads = threads
 		}
-		w.cachedReviewThreads = threads
 
 		s := w.evaluate()
 		w.logger.Info("evaluated state", "state", stateString(s))

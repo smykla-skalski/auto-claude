@@ -113,6 +113,10 @@ type graphQLResponse struct {
 		Repository struct {
 			PullRequest struct {
 				ReviewThreads struct {
+					PageInfo struct {
+						HasNextPage bool   `json:"hasNextPage"`
+						EndCursor   string `json:"endCursor"`
+					} `json:"pageInfo"`
 					Nodes []graphQLThread `json:"nodes"`
 				} `json:"reviewThreads"`
 			} `json:"pullRequest"`
@@ -138,10 +142,14 @@ type graphQLComment struct {
 }
 
 func (c *Client) GetReviewThreads(ctx context.Context, owner, repo string, number int) ([]ReviewThread, error) {
-	query := `query($owner: String!, $repo: String!, $pr: Int!) {
+	query := `query($owner: String!, $repo: String!, $pr: Int!, $cursor: String) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $pr) {
-      reviewThreads(first: 100) {
+      reviewThreads(first: 100, after: $cursor) {
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
         nodes {
           isResolved
           isOutdated
@@ -159,39 +167,51 @@ func (c *Client) GetReviewThreads(ctx context.Context, owner, repo string, numbe
   }
 }`
 
-	args := []string{
-		"api", "graphql",
-		"-f", "owner=" + owner,
-		"-f", "repo=" + repo,
-		"-F", fmt.Sprintf("pr=%d", number),
-		"-f", "query=" + query,
-	}
-
-	out, err := c.gh(ctx, args...)
-	if err != nil {
-		return nil, fmt.Errorf("get review threads PR #%d: %w", number, err)
-	}
-
-	var resp graphQLResponse
-	if err := json.Unmarshal(out, &resp); err != nil {
-		return nil, fmt.Errorf("parse review threads: %w", err)
-	}
-
 	var threads []ReviewThread
-	for _, t := range resp.Data.Repository.PullRequest.ReviewThreads.Nodes {
-		rt := ReviewThread{
-			IsResolved: t.IsResolved,
-			IsOutdated: t.IsOutdated,
-			Path:       t.Path,
-			Line:       t.Line,
+	cursor := ""
+
+	for {
+		args := []string{
+			"api", "graphql",
+			"-f", "owner=" + owner,
+			"-f", "repo=" + repo,
+			"-F", fmt.Sprintf("pr=%d", number),
+			"-f", "query=" + query,
 		}
-		for _, c := range t.Comments.Nodes {
-			rt.Comments = append(rt.Comments, ReviewComment{
-				Author: c.Author.Login,
-				Body:   c.Body,
-			})
+		if cursor != "" {
+			args = append(args, "-f", "cursor="+cursor)
 		}
-		threads = append(threads, rt)
+
+		out, err := c.gh(ctx, args...)
+		if err != nil {
+			return nil, fmt.Errorf("get review threads PR #%d: %w", number, err)
+		}
+
+		var resp graphQLResponse
+		if err := json.Unmarshal(out, &resp); err != nil {
+			return nil, fmt.Errorf("parse review threads: %w", err)
+		}
+
+		for _, t := range resp.Data.Repository.PullRequest.ReviewThreads.Nodes {
+			rt := ReviewThread{
+				IsResolved: t.IsResolved,
+				IsOutdated: t.IsOutdated,
+				Path:       t.Path,
+				Line:       t.Line,
+			}
+			for _, c := range t.Comments.Nodes {
+				rt.Comments = append(rt.Comments, ReviewComment{
+					Author: c.Author.Login,
+					Body:   c.Body,
+				})
+			}
+			threads = append(threads, rt)
+		}
+
+		if !resp.Data.Repository.PullRequest.ReviewThreads.PageInfo.HasNextPage {
+			break
+		}
+		cursor = resp.Data.Repository.PullRequest.ReviewThreads.PageInfo.EndCursor
 	}
 
 	return threads, nil
