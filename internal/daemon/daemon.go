@@ -104,10 +104,17 @@ func (d *Daemon) pollRepo(ctx context.Context, repo config.RepoConfig) error {
 	d.prCacheMu.Lock()
 	d.prCache[repoKey] = prs
 
-	// Cache Copilot review status for each PR if required
+	// Cache Copilot review status for each PR if required (skip Renovate PRs)
 	if *repo.RequireCopilotReview {
 		for _, pr := range prs {
 			prKey := workerKey(repo.Owner, repo.Name, pr.Number)
+
+			// Skip fetching review threads for Renovate PRs (mirrors worker behavior)
+			if isRenovateAuthor(pr.Author.Login) {
+				d.copilotReviewCache[prKey] = false
+				d.copilotUnresolvedCache[prKey] = false
+				continue
+			}
 
 			// Fetch review threads to check Copilot status
 			hasCopilotReview := false
