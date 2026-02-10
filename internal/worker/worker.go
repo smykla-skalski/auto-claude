@@ -20,8 +20,6 @@ const (
 	stateReviewsPending
 	stateChecksPending
 	stateReady
-
-	maxRetriesPerAction = 3
 )
 
 var (
@@ -48,7 +46,6 @@ type Worker struct {
 	logger *slog.Logger
 
 	cachedReviewThreads []github.ReviewThread
-	retries             map[state]int
 
 	onClaudeStart func(action string)
 	onClaudeEnd   func()
@@ -62,7 +59,6 @@ func New(repo config.RepoConfig, pr github.PRInfo, gh *github.Client, cl *claude
 		claude:        cl,
 		git:           g,
 		logger:        logger.With("pr", pr.Number, "repo", repo.Owner+"/"+repo.Name),
-		retries:       make(map[state]int),
 		onClaudeStart: onClaudeStart,
 		onClaudeEnd:   onClaudeEnd,
 	}
@@ -132,34 +128,13 @@ func (w *Worker) Run(ctx context.Context) error {
 			return nil
 
 		case stateConflicting:
-			if w.retries[stateConflicting] >= maxRetriesPerAction {
-				w.logger.Warn("max retries for conflict resolution")
-				return fmt.Errorf("max retries for conflict resolution")
-			}
 			actionErr = w.resolveConflicts(ctx, wtDir)
-			if actionErr != nil {
-				w.retries[stateConflicting]++
-			}
 
 		case stateChecksFailing:
-			if w.retries[stateChecksFailing] >= maxRetriesPerAction {
-				w.logger.Warn("max retries for fixing checks")
-				return fmt.Errorf("max retries for fixing checks")
-			}
 			actionErr = w.fixChecks(ctx, wtDir)
-			if actionErr != nil {
-				w.retries[stateChecksFailing]++
-			}
 
 		case stateReviewsPending:
-			if w.retries[stateReviewsPending] >= maxRetriesPerAction {
-				w.logger.Warn("max retries for fixing reviews")
-				return fmt.Errorf("max retries for fixing reviews")
-			}
 			actionErr = w.fixReviews(ctx, wtDir)
-			if actionErr != nil {
-				w.retries[stateReviewsPending]++
-			}
 
 		case stateChecksPending:
 			w.logger.Info("checks pending, waiting for next poll")
