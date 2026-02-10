@@ -179,7 +179,24 @@ func (w *Worker) fixReviews(ctx context.Context, wtDir string) error {
 		return nil
 	}
 
-	w.logger.Info("found unresolved copilot reviews", "count", len(unresolvedThreads))
+	// Log details about unresolved threads for debugging
+	var threadDetails []string
+	for _, t := range w.cachedReviewThreads {
+		if t.IsResolved || t.IsOutdated {
+			continue
+		}
+		for _, c := range t.Comments {
+			if isCopilotAuthor(c.Author) {
+				commentPreview := c.Body
+				if len(commentPreview) > 100 {
+					commentPreview = commentPreview[:100] + "..."
+				}
+				threadDetails = append(threadDetails, fmt.Sprintf("%s:%d - %s", t.Path, t.Line, commentPreview))
+				break
+			}
+		}
+	}
+	w.logger.Info("found unresolved copilot reviews", "count", len(unresolvedThreads), "threads", threadDetails)
 
 	if err := w.git.Fetch(ctx, wtDir); err != nil {
 		return fmt.Errorf("fetch: %w", err)
