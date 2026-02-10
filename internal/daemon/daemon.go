@@ -372,7 +372,7 @@ func (d *Daemon) GetSnapshot() tui.Snapshot {
 			prStates = append(prStates, tui.PRState{
 				Number:    pr.Number,
 				Title:     pr.Title,
-				States:    inferStatesFromPR(pr, *repo.RequireCopilotReview, hasCopilotReview, hasUnresolvedCopilot),
+				States:    inferStatesFromPR(pr, *repo.RequireCopilotReview && !isRenovateAuthor(pr.Author.Login), hasCopilotReview, hasUnresolvedCopilot),
 				Author:    pr.Author.Login,
 				HasWorker: hasWorker,
 			})
@@ -416,8 +416,19 @@ var copilotAuthors = map[string]bool{
 	"copilot-pull-request-reviewer": true,
 }
 
+var renovateAuthors = map[string]bool{
+	"renovate":      true,
+	"renovate[bot]": true,
+	"renovate-bot":  true,
+	"app/renovate":  true,
+}
+
 func isCopilotAuthor(author string) bool {
 	return copilotAuthors[author]
+}
+
+func isRenovateAuthor(author string) bool {
+	return renovateAuthors[author]
 }
 
 func inferStatesFromPR(pr github.PRInfo, requireCopilot bool, hasCopilotReview bool, hasUnresolvedCopilot bool) []string {
