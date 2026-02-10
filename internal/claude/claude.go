@@ -133,6 +133,7 @@ func (c *Client) RunWithCallback(ctx context.Context, workdir, prompt string, ca
 	go func() {
 		scanner := bufio.NewScanner(stdout)
 		scanner.Buffer(make([]byte, 64*1024), 1024*1024) // 1MB max token
+		var lineBuf strings.Builder // Buffer for partial deltas
 		for scanner.Scan() {
 			line := scanner.Text()
 			outputMu.Lock()
@@ -144,9 +145,25 @@ func (c *Client) RunWithCallback(ctx context.Context, workdir, prompt string, ca
 			if callback != nil {
 				text := extractTextFromStreamEvent(line)
 				if text != "" {
-					callback(text)
+					lineBuf.WriteString(text)
+					// Split on newlines and send complete lines
+					content := lineBuf.String()
+					if idx := strings.LastIndex(content, "\n"); idx >= 0 {
+						lines := strings.Split(content[:idx+1], "\n")
+						for _, l := range lines {
+							if l != "" {
+								callback(l)
+							}
+						}
+						lineBuf.Reset()
+						lineBuf.WriteString(content[idx+1:])
+					}
 				}
 			}
+		}
+		// Flush remaining partial line if any
+		if callback != nil && lineBuf.Len() > 0 {
+			callback(lineBuf.String())
 		}
 		scanErrs <- scanner.Err()
 		done <- struct{}{}
@@ -203,12 +220,6 @@ func (c *Client) parseResult(out []byte) (*Result, error) {
 	// Try parsing JSON response
 	var resp jsonResponse
 	if jsonErr := json.Unmarshal(out, &resp); jsonErr == nil {
-		c.logger.Info("claude completed",
-			"duration_ms", resp.DurationMs,
-			"cost_usd", resp.TotalCostUSD,
-			"turns", resp.NumTurns,
-			"session_id", resp.SessionID)
-
 		return &Result{
 			Success:      !resp.IsError,
 			Output:       resp.Result,
@@ -245,12 +256,6 @@ func (c *Client) parseStreamResult(out []byte) (*Result, error) {
 	}
 
 	if resultData != nil {
-		c.logger.Info("claude completed",
-			"duration_ms", resultData.DurationMs,
-			"cost_usd", resultData.TotalCostUSD,
-			"turns", resultData.NumTurns,
-			"session_id", resultData.SessionID)
-
 		return &Result{
 			Success:      !resultData.IsError,
 			Output:       resultData.Result,
@@ -358,6 +363,7 @@ func (c *Client) RunCommandWithCallback(ctx context.Context, workdir, outputDir,
 		go func() {
 			scanner := bufio.NewScanner(stdout)
 			scanner.Buffer(make([]byte, 64*1024), 1024*1024) // 1MB max token
+			var lineBuf strings.Builder // Buffer for partial deltas
 			for scanner.Scan() {
 				line := scanner.Text()
 				outputMu.Lock()
@@ -369,9 +375,25 @@ func (c *Client) RunCommandWithCallback(ctx context.Context, workdir, outputDir,
 				if callback != nil {
 					text := extractTextFromStreamEvent(line)
 					if text != "" {
-						callback(text)
+						lineBuf.WriteString(text)
+						// Split on newlines and send complete lines
+						content := lineBuf.String()
+						if idx := strings.LastIndex(content, "\n"); idx >= 0 {
+							lines := strings.Split(content[:idx+1], "\n")
+							for _, l := range lines {
+								if l != "" {
+									callback(l)
+								}
+							}
+							lineBuf.Reset()
+							lineBuf.WriteString(content[idx+1:])
+						}
 					}
 				}
+			}
+			// Flush remaining partial line if any
+			if callback != nil && lineBuf.Len() > 0 {
+				callback(lineBuf.String())
 			}
 			scanErrs <- scanner.Err()
 			done <- struct{}{}
