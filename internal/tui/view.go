@@ -62,6 +62,13 @@ func renderDetailView(session ClaudeSessionState, scrollOffset int) string {
 	if startIdx < 0 {
 		startIdx = 0
 	}
+	// Clamp startIdx to valid range (prevent blank view when overscrolled)
+	if startIdx > len(session.Output)-maxLines && len(session.Output) > maxLines {
+		startIdx = len(session.Output) - maxLines
+	}
+	if startIdx > len(session.Output) {
+		startIdx = max(0, len(session.Output)-1)
+	}
 	endIdx := startIdx + maxLines
 	if endIdx > len(session.Output) {
 		endIdx = len(session.Output)

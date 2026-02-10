@@ -93,20 +93,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.scrollOffset--
 				}
 			case "down", "j":
-				m.scrollOffset++
+				if m.selectedSession >= 0 && m.selectedSession < len(m.snapshot.ClaudeSessions) {
+					outputLen := len(m.snapshot.ClaudeSessions[m.selectedSession].Output)
+					const maxLines = 40
+					maxOffset := max(0, outputLen-maxLines)
+					m.scrollOffset = min(m.scrollOffset+1, maxOffset)
+				}
 			case "pageup":
 				m.scrollOffset -= 10
 				if m.scrollOffset < 0 {
 					m.scrollOffset = 0
 				}
 			case "pagedown":
-				m.scrollOffset += 10
+				if m.selectedSession >= 0 && m.selectedSession < len(m.snapshot.ClaudeSessions) {
+					outputLen := len(m.snapshot.ClaudeSessions[m.selectedSession].Output)
+					const maxLines = 40
+					maxOffset := max(0, outputLen-maxLines)
+					m.scrollOffset = min(m.scrollOffset+10, maxOffset)
+				}
 			case "home", "g":
 				m.scrollOffset = 0
 			case "end", "G":
-				// Scroll to bottom
+				// Scroll to bottom (clamped to valid range)
 				if m.selectedSession >= 0 && m.selectedSession < len(m.snapshot.ClaudeSessions) {
-					m.scrollOffset = len(m.snapshot.ClaudeSessions[m.selectedSession].Output)
+					outputLen := len(m.snapshot.ClaudeSessions[m.selectedSession].Output)
+					const maxLines = 40
+					m.scrollOffset = max(0, outputLen-maxLines)
 				}
 			}
 		}

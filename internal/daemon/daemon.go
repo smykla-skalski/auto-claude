@@ -333,15 +333,19 @@ func (d *Daemon) trackClaudeStart(key string, repo string, prNumber int, action 
 
 func (d *Daemon) trackClaudeOutput(key string, line string) {
 	d.sessionsMu.Lock()
-	defer d.sessionsMu.Unlock()
-	if session, ok := d.claudeSessions[key]; ok {
-		session.mu.Lock()
-		session.output = append(session.output, line)
-		// Keep last 1000 lines to avoid memory growth
-		if len(session.output) > 1000 {
-			session.output = session.output[len(session.output)-1000:]
-		}
-		session.mu.Unlock()
+	session, ok := d.claudeSessions[key]
+	d.sessionsMu.Unlock()
+	if !ok {
+		return
+	}
+
+	session.mu.Lock()
+	defer session.mu.Unlock()
+
+	session.output = append(session.output, line)
+	// Keep last 1000 lines to avoid memory growth
+	if len(session.output) > 1000 {
+		session.output = session.output[len(session.output)-1000:]
 	}
 }
 

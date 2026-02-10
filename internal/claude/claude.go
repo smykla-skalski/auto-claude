@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -92,41 +93,62 @@ func (c *Client) RunWithCallback(ctx context.Context, workdir, prompt string, ca
 	}
 
 	var outputBuf strings.Builder
+	var outputMu sync.Mutex
 	done := make(chan struct{}, 2)
+	scanErrs := make(chan error, 2)
 
 	// Stream stdout
 	go func() {
 		scanner := bufio.NewScanner(stdout)
+		scanner.Buffer(make([]byte, 64*1024), 1024*1024) // 1MB max token
 		for scanner.Scan() {
 			line := scanner.Text()
+			outputMu.Lock()
 			outputBuf.WriteString(line)
 			outputBuf.WriteString("\n")
+			outputMu.Unlock()
 			if callback != nil {
 				callback(line)
 			}
 		}
+		scanErrs <- scanner.Err()
 		done <- struct{}{}
 	}()
 
 	// Stream stderr
 	go func() {
 		scanner := bufio.NewScanner(stderr)
+		scanner.Buffer(make([]byte, 64*1024), 1024*1024) // 1MB max token
 		for scanner.Scan() {
 			line := scanner.Text()
+			outputMu.Lock()
 			outputBuf.WriteString(line)
 			outputBuf.WriteString("\n")
+			outputMu.Unlock()
 			if callback != nil {
 				callback(line)
 			}
 		}
+		scanErrs <- scanner.Err()
 		done <- struct{}{}
 	}()
 
 	// Wait for both goroutines
 	<-done
 	<-done
+
+	// Check scanner errors
+	if scanErr := <-scanErrs; scanErr != nil {
+		return nil, fmt.Errorf("scan stdout: %w", scanErr)
+	}
+	if scanErr := <-scanErrs; scanErr != nil {
+		return nil, fmt.Errorf("scan stderr: %w", scanErr)
+	}
+
 	err = cmd.Wait()
+	outputMu.Lock()
 	out := []byte(outputBuf.String())
+	outputMu.Unlock()
 
 	if err != nil {
 		return &Result{
@@ -208,37 +230,58 @@ func (c *Client) RunCommandWithCallback(ctx context.Context, workdir, outputDir,
 		}
 
 		var outputBuf strings.Builder
+		var outputMu sync.Mutex
 		done := make(chan struct{}, 2)
+		scanErrs := make(chan error, 2)
 
 		// Stream stdout
 		go func() {
 			scanner := bufio.NewScanner(stdout)
+			scanner.Buffer(make([]byte, 64*1024), 1024*1024) // 1MB max token
 			for scanner.Scan() {
 				line := scanner.Text()
+				outputMu.Lock()
 				outputBuf.WriteString(line)
 				outputBuf.WriteString("\n")
+				outputMu.Unlock()
 				callback(line)
 			}
+			scanErrs <- scanner.Err()
 			done <- struct{}{}
 		}()
 
 		// Stream stderr
 		go func() {
 			scanner := bufio.NewScanner(stderr)
+			scanner.Buffer(make([]byte, 64*1024), 1024*1024) // 1MB max token
 			for scanner.Scan() {
 				line := scanner.Text()
+				outputMu.Lock()
 				outputBuf.WriteString(line)
 				outputBuf.WriteString("\n")
+				outputMu.Unlock()
 				callback(line)
 			}
+			scanErrs <- scanner.Err()
 			done <- struct{}{}
 		}()
 
 		// Wait for both goroutines
 		<-done
 		<-done
+
+		// Check scanner errors
+		if scanErr := <-scanErrs; scanErr != nil {
+			return nil, fmt.Errorf("scan stdout: %w", scanErr)
+		}
+		if scanErr := <-scanErrs; scanErr != nil {
+			return nil, fmt.Errorf("scan stderr: %w", scanErr)
+		}
+
 		cmdErr = cmd.Wait()
+		outputMu.Lock()
 		out = []byte(outputBuf.String())
+		outputMu.Unlock()
 	}
 
 	// Save full output to file with high-resolution timestamp
