@@ -191,7 +191,7 @@ func (w *Worker) fixReviews(ctx context.Context, wtDir string) error {
 				if len(commentPreview) > 100 {
 					commentPreview = commentPreview[:100] + "..."
 				}
-				threadDetails = append(threadDetails, fmt.Sprintf("%s:%d", t.Path, t.Line))
+				threadDetails = append(threadDetails, fmt.Sprintf("%s:%d - %s", t.Path, t.Line, commentPreview))
 				break
 			}
 		}

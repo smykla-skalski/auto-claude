@@ -1,5 +1,6 @@
 [tools]
 go = "1.25.7"
+golangci-lint = "2.8.0"
 
 [tasks.dev]
 description = "Start auto-claude daemon"
