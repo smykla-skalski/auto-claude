@@ -34,6 +34,7 @@ var (
 		"renovate":      {},
 		"renovate[bot]": {},
 		"renovate-bot":  {},
+		"app/renovate":  {},
 	}
 )
 
