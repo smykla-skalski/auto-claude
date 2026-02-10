@@ -137,7 +137,7 @@ func (d *Daemon) pollRepo(ctx context.Context, repo config.RepoConfig) error {
 			}
 
 			for _, r := range reviews {
-				if isCopilotAuthor(r.Author) {
+				if isCopilotAuthor(r.Author) && r.State != "PENDING" && r.State != "DISMISSED" {
 					hasCopilotReview = true
 					break
 				}

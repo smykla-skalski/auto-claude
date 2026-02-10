@@ -70,6 +70,7 @@ type ReviewComment struct {
 
 type Review struct {
 	Author string `json:"author"`
+	State  string `json:"state"`
 }
 
 func (c *Client) ListOpenPRs(ctx context.Context, owner, repo string) ([]PRInfo, error) {
@@ -258,6 +259,7 @@ func (c *Client) GetReviews(ctx context.Context, owner, repo string, number int)
 	for _, r := range resp.Reviews {
 		reviews = append(reviews, Review{
 			Author: r.Author.Login,
+			State:  r.State,
 		})
 	}
 

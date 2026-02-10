@@ -116,10 +116,10 @@ func (w *Worker) Run(ctx context.Context) error {
 			}
 			w.cachedReviews = reviews
 
-			// Only fetch review threads if Copilot review exists
+			// Only fetch review threads if Copilot review exists (ignore PENDING/DISMISSED)
 			hasCopilotReview := false
 			for _, r := range reviews {
-				if isCopilotAuthor(r.Author) {
+				if isCopilotAuthor(r.Author) && r.State != "PENDING" && r.State != "DISMISSED" {
 					hasCopilotReview = true
 					break
 				}
