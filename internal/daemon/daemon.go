@@ -116,12 +116,24 @@ func (d *Daemon) pollRepo(ctx context.Context, repo config.RepoConfig) error {
 				continue
 			}
 
-			// Fetch review threads to check Copilot status
+			// Fetch reviews to check Copilot status
 			hasCopilotReview := false
 			hasUnresolvedCopilot := false
+
+			// Check top-level reviews
+			reviews, err := d.gh.GetReviews(ctx, repo.Owner, repo.Name, pr.Number)
+			if err == nil {
+				for _, r := range reviews {
+					if isCopilotAuthor(r.Author) {
+						hasCopilotReview = true
+						break
+					}
+				}
+			}
+
+			// Check review threads (inline comments)
 			threads, err := d.gh.GetReviewThreads(ctx, repo.Owner, repo.Name, pr.Number)
 			if err == nil {
-				// Check if Copilot has commented and if threads are unresolved
 				for _, t := range threads {
 					hasCopilotInThread := false
 					for _, c := range t.Comments {

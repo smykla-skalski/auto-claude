@@ -68,6 +68,11 @@ type ReviewComment struct {
 	Body   string `json:"body"`
 }
 
+type Review struct {
+	Author string `json:"author"`
+	State  string `json:"state"`
+}
+
 func (c *Client) ListOpenPRs(ctx context.Context, owner, repo string) ([]PRInfo, error) {
 	args := []string{
 		"pr", "list",
@@ -224,6 +229,41 @@ func (c *Client) GetReviewThreads(ctx context.Context, owner, repo string, numbe
 	}
 
 	return threads, nil
+}
+
+func (c *Client) GetReviews(ctx context.Context, owner, repo string, number int) ([]Review, error) {
+	args := []string{
+		"pr", "view", fmt.Sprintf("%d", number),
+		"-R", owner + "/" + repo,
+		"--json", "reviews",
+	}
+
+	out, err := c.gh(ctx, args...)
+	if err != nil {
+		return nil, fmt.Errorf("get reviews PR #%d: %w", number, err)
+	}
+
+	var resp struct {
+		Reviews []struct {
+			Author struct {
+				Login string `json:"login"`
+			} `json:"author"`
+			State string `json:"state"`
+		} `json:"reviews"`
+	}
+	if err := json.Unmarshal(out, &resp); err != nil {
+		return nil, fmt.Errorf("parse reviews: %w", err)
+	}
+
+	var reviews []Review
+	for _, r := range resp.Reviews {
+		reviews = append(reviews, Review{
+			Author: r.Author.Login,
+			State:  r.State,
+		})
+	}
+
+	return reviews, nil
 }
 
 func (c *Client) ResolveReviewThread(ctx context.Context, threadID string) error {
