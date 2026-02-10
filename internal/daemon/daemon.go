@@ -20,6 +20,8 @@ type claudeSession struct {
 	prNumber int
 	action   string
 	started  time.Time
+	mu       sync.Mutex
+	output   []string // Live output lines (thread-safe with mu)
 }
 
 type Daemon struct {
@@ -258,8 +260,11 @@ func (d *Daemon) startWorker(ctx context.Context, repo config.RepoConfig, pr git
 	onClaudeEnd := func() {
 		d.trackClaudeEnd(key)
 	}
+	onClaudeOutput := func(line string) {
+		d.trackClaudeOutput(key, line)
+	}
 
-	w := worker.New(repo, pr, d.gh, d.claude, d.git, d.logger, onClaudeStart, onClaudeEnd)
+	w := worker.New(repo, pr, d.gh, d.claude, d.git, d.logger, onClaudeStart, onClaudeEnd, onClaudeOutput)
 
 	d.wg.Add(1)
 	go func() {
@@ -322,6 +327,25 @@ func (d *Daemon) trackClaudeStart(key string, repo string, prNumber int, action 
 		prNumber: prNumber,
 		action:   action,
 		started:  time.Now(),
+		output:   make([]string, 0, 100),
+	}
+}
+
+func (d *Daemon) trackClaudeOutput(key string, line string) {
+	d.sessionsMu.Lock()
+	session, ok := d.claudeSessions[key]
+	d.sessionsMu.Unlock()
+	if !ok {
+		return
+	}
+
+	session.mu.Lock()
+	defer session.mu.Unlock()
+
+	session.output = append(session.output, line)
+	// Keep last 1000 lines to avoid memory growth
+	if len(session.output) > 1000 {
+		session.output = session.output[len(session.output)-1000:]
 	}
 }
 
@@ -366,11 +390,17 @@ func (d *Daemon) GetSnapshot() tui.Snapshot {
 	d.sessionsMu.Lock()
 	sessions := make([]tui.ClaudeSessionState, 0, len(d.claudeSessions))
 	for _, s := range d.claudeSessions {
+		s.mu.Lock()
+		outputCopy := make([]string, len(s.output))
+		copy(outputCopy, s.output)
+		s.mu.Unlock()
+
 		sessions = append(sessions, tui.ClaudeSessionState{
 			Repo:     s.repo,
 			PRNumber: s.prNumber,
 			Action:   s.action,
 			Duration: time.Since(s.started).Round(time.Second),
+			Output:   outputCopy,
 		})
 	}
 	d.sessionsMu.Unlock()

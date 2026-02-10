@@ -30,4 +30,5 @@ type ClaudeSessionState struct {
 	PRNumber int
 	Action   string
 	Duration time.Duration
+	Output   []string
 }

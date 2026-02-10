@@ -49,20 +49,22 @@ type Worker struct {
 	cachedReviews       []github.Review
 	cachedReviewThreads []github.ReviewThread
 
-	onClaudeStart func(action string)
-	onClaudeEnd   func()
+	onClaudeStart  func(action string)
+	onClaudeEnd    func()
+	onClaudeOutput func(line string)
 }
 
-func New(repo config.RepoConfig, pr github.PRInfo, gh *github.Client, cl *claude.Client, g *git.Client, logger *slog.Logger, onClaudeStart func(action string), onClaudeEnd func()) *Worker {
+func New(repo config.RepoConfig, pr github.PRInfo, gh *github.Client, cl *claude.Client, g *git.Client, logger *slog.Logger, onClaudeStart func(action string), onClaudeEnd func(), onClaudeOutput func(line string)) *Worker {
 	return &Worker{
-		repo:          repo,
-		pr:            pr,
-		gh:            gh,
-		claude:        cl,
-		git:           g,
-		logger:        logger.With("pr", pr.Number, "repo", repo.Owner+"/"+repo.Name),
-		onClaudeStart: onClaudeStart,
-		onClaudeEnd:   onClaudeEnd,
+		repo:           repo,
+		pr:             pr,
+		gh:             gh,
+		claude:         cl,
+		git:            g,
+		logger:         logger.With("pr", pr.Number, "repo", repo.Owner+"/"+repo.Name),
+		onClaudeStart:  onClaudeStart,
+		onClaudeEnd:    onClaudeEnd,
+		onClaudeOutput: onClaudeOutput,
 	}
 }
 

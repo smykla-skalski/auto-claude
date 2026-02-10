@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -31,6 +33,9 @@ type Result struct {
 	NumTurns     int
 }
 
+// OutputCallback receives live output line by line as Claude runs
+type OutputCallback func(line string)
+
 type jsonResponse struct {
 	Result       string  `json:"result"`
 	IsError      bool    `json:"is_error"`
@@ -42,6 +47,11 @@ type jsonResponse struct {
 
 // Run spawns Claude Code CLI non-interactively.
 func (c *Client) Run(ctx context.Context, workdir, prompt string) (*Result, error) {
+	return c.RunWithCallback(ctx, workdir, prompt, nil)
+}
+
+// RunWithCallback spawns Claude with live output streaming via callback
+func (c *Client) RunWithCallback(ctx context.Context, workdir, prompt string, callback OutputCallback) (*Result, error) {
 	args := []string{
 		"-p", prompt,
 		"--output-format", "json",
@@ -55,7 +65,91 @@ func (c *Client) Run(ctx context.Context, workdir, prompt string) (*Result, erro
 
 	cmd := exec.CommandContext(ctx, "claude", args...)
 	cmd.Dir = workdir
-	out, err := cmd.CombinedOutput()
+
+	if callback == nil {
+		// No streaming, use original behavior
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return &Result{
+				Success: false,
+				Output:  string(out),
+			}, fmt.Errorf("claude: %w\n%s", err, string(out))
+		}
+		return c.parseResult(out)
+	}
+
+	// Stream output
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("create stdout pipe: %w", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("create stderr pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("start claude: %w", err)
+	}
+
+	var outputBuf strings.Builder
+	var outputMu sync.Mutex
+	done := make(chan struct{}, 2)
+	scanErrs := make(chan error, 2)
+
+	// Stream stdout
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		scanner.Buffer(make([]byte, 64*1024), 1024*1024) // 1MB max token
+		for scanner.Scan() {
+			line := scanner.Text()
+			outputMu.Lock()
+			outputBuf.WriteString(line)
+			outputBuf.WriteString("\n")
+			outputMu.Unlock()
+			if callback != nil {
+				callback(line)
+			}
+		}
+		scanErrs <- scanner.Err()
+		done <- struct{}{}
+	}()
+
+	// Stream stderr
+	go func() {
+		scanner := bufio.NewScanner(stderr)
+		scanner.Buffer(make([]byte, 64*1024), 1024*1024) // 1MB max token
+		for scanner.Scan() {
+			line := scanner.Text()
+			outputMu.Lock()
+			outputBuf.WriteString(line)
+			outputBuf.WriteString("\n")
+			outputMu.Unlock()
+			if callback != nil {
+				callback(line)
+			}
+		}
+		scanErrs <- scanner.Err()
+		done <- struct{}{}
+	}()
+
+	// Wait for both goroutines
+	<-done
+	<-done
+
+	// Check scanner errors
+	if scanErr := <-scanErrs; scanErr != nil {
+		return nil, fmt.Errorf("scan stdout: %w", scanErr)
+	}
+	if scanErr := <-scanErrs; scanErr != nil {
+		return nil, fmt.Errorf("scan stderr: %w", scanErr)
+	}
+
+	err = cmd.Wait()
+	outputMu.Lock()
+	out := []byte(outputBuf.String())
+	outputMu.Unlock()
+
 	if err != nil {
 		return &Result{
 			Success: false,
@@ -63,6 +157,10 @@ func (c *Client) Run(ctx context.Context, workdir, prompt string) (*Result, erro
 		}, fmt.Errorf("claude: %w\n%s", err, string(out))
 	}
 
+	return c.parseResult(out)
+}
+
+func (c *Client) parseResult(out []byte) (*Result, error) {
 	// Try parsing JSON response
 	var resp jsonResponse
 	if jsonErr := json.Unmarshal(out, &resp); jsonErr == nil {
@@ -92,6 +190,11 @@ func (c *Client) Run(ctx context.Context, workdir, prompt string) (*Result, erro
 // RunCommand spawns Claude Code CLI with a slash command.
 // outputDir specifies where to save full Claude output logs.
 func (c *Client) RunCommand(ctx context.Context, workdir, outputDir, command string, args ...string) (*Result, error) {
+	return c.RunCommandWithCallback(ctx, workdir, outputDir, command, nil, args...)
+}
+
+// RunCommandWithCallback spawns Claude command with live output streaming
+func (c *Client) RunCommandWithCallback(ctx context.Context, workdir, outputDir, command string, callback OutputCallback, args ...string) (*Result, error) {
 	cliArgs := []string{
 		"-p", fmt.Sprintf("/%s %s", command, strings.Join(args, " ")),
 		"--output-format", "json",
@@ -104,7 +207,82 @@ func (c *Client) RunCommand(ctx context.Context, workdir, outputDir, command str
 
 	cmd := exec.CommandContext(ctx, "claude", cliArgs...)
 	cmd.Dir = workdir
-	out, err := cmd.CombinedOutput()
+
+	var out []byte
+	var cmdErr error
+
+	if callback == nil {
+		// No streaming
+		out, cmdErr = cmd.CombinedOutput()
+	} else {
+		// Stream output
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			return nil, fmt.Errorf("create stdout pipe: %w", err)
+		}
+		stderr, err := cmd.StderrPipe()
+		if err != nil {
+			return nil, fmt.Errorf("create stderr pipe: %w", err)
+		}
+
+		if err := cmd.Start(); err != nil {
+			return nil, fmt.Errorf("start claude: %w", err)
+		}
+
+		var outputBuf strings.Builder
+		var outputMu sync.Mutex
+		done := make(chan struct{}, 2)
+		scanErrs := make(chan error, 2)
+
+		// Stream stdout
+		go func() {
+			scanner := bufio.NewScanner(stdout)
+			scanner.Buffer(make([]byte, 64*1024), 1024*1024) // 1MB max token
+			for scanner.Scan() {
+				line := scanner.Text()
+				outputMu.Lock()
+				outputBuf.WriteString(line)
+				outputBuf.WriteString("\n")
+				outputMu.Unlock()
+				callback(line)
+			}
+			scanErrs <- scanner.Err()
+			done <- struct{}{}
+		}()
+
+		// Stream stderr
+		go func() {
+			scanner := bufio.NewScanner(stderr)
+			scanner.Buffer(make([]byte, 64*1024), 1024*1024) // 1MB max token
+			for scanner.Scan() {
+				line := scanner.Text()
+				outputMu.Lock()
+				outputBuf.WriteString(line)
+				outputBuf.WriteString("\n")
+				outputMu.Unlock()
+				callback(line)
+			}
+			scanErrs <- scanner.Err()
+			done <- struct{}{}
+		}()
+
+		// Wait for both goroutines
+		<-done
+		<-done
+
+		// Check scanner errors
+		if scanErr := <-scanErrs; scanErr != nil {
+			return nil, fmt.Errorf("scan stdout: %w", scanErr)
+		}
+		if scanErr := <-scanErrs; scanErr != nil {
+			return nil, fmt.Errorf("scan stderr: %w", scanErr)
+		}
+
+		cmdErr = cmd.Wait()
+		outputMu.Lock()
+		out = []byte(outputBuf.String())
+		outputMu.Unlock()
+	}
 
 	// Save full output to file with high-resolution timestamp
 	now := time.Now()
@@ -121,13 +299,13 @@ func (c *Client) RunCommand(ctx context.Context, workdir, outputDir, command str
 		c.logger.Warn("failed to save claude output", "err", writeErr)
 	}
 
-	if err != nil {
+	if cmdErr != nil {
 		c.logger.Error("claude command failed", "command", command, "output_file", logFile)
 		return &Result{
 			Success:    false,
 			Output:     string(out),
 			OutputFile: logFile,
-		}, fmt.Errorf("claude command %s: %w\n%s", command, err, string(out))
+		}, fmt.Errorf("claude command %s: %w\n%s", command, cmdErr, string(out))
 	}
 
 	var resp jsonResponse

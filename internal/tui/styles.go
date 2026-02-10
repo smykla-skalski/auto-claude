@@ -36,6 +36,11 @@ var (
 	sessionStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("252"))
 
+	selectedSessionStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("39")).
+				Background(lipgloss.Color("237"))
+
 	footerStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("240")).
 			MarginTop(1)

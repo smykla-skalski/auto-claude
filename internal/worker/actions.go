@@ -30,7 +30,7 @@ func (w *Worker) resolveConflicts(ctx context.Context, wtDir string) error {
 		}
 	}()
 
-	result, err := w.claude.Run(ctx, wtDir, prompt)
+	result, err := w.claude.RunWithCallback(ctx, wtDir, prompt, w.onClaudeOutput)
 	w.onClaudeEnd()
 	endCalled = true
 	if err != nil {
@@ -85,7 +85,7 @@ func (w *Worker) fixChecks(ctx context.Context, wtDir string) error {
 		}
 	}()
 
-	result, err := w.claude.Run(ctx, wtDir, prompt)
+	result, err := w.claude.RunWithCallback(ctx, wtDir, prompt, w.onClaudeOutput)
 	w.onClaudeEnd()
 	endCalled = true
 	if err != nil {
@@ -217,7 +217,7 @@ func (w *Worker) fixReviews(ctx context.Context, wtDir string) error {
 	}()
 
 	prURL := fmt.Sprintf("https://github.com/%s/%s/pull/%d", w.repo.Owner, w.repo.Name, w.pr.Number)
-	result, err := w.claude.RunCommand(ctx, wtDir, outputDir, "fix-review-auto", prURL)
+	result, err := w.claude.RunCommandWithCallback(ctx, wtDir, outputDir, "fix-review-auto", w.onClaudeOutput, prURL)
 	w.onClaudeEnd()
 	endCalled = true
 	if err != nil {

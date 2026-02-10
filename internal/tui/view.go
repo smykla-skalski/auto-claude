@@ -9,7 +9,7 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
-func renderView(snap Snapshot) string {
+func renderListView(snap Snapshot, selectedSession int) string {
 	var b strings.Builder
 
 	// Header
@@ -31,12 +31,68 @@ func renderView(snap Snapshot) string {
 	b.WriteString("\n")
 	b.WriteString(sectionStyle.Render(fmt.Sprintf("🤖 Active Claude Sessions (%d)", len(snap.ClaudeSessions))))
 	b.WriteString("\n")
-	b.WriteString(renderSessions(snap.ClaudeSessions))
+	b.WriteString(renderSessions(snap.ClaudeSessions, selectedSession))
 
 	// Footer
 	b.WriteString("\n")
-	footer := fmt.Sprintf("Last updated: %s │ q:quit r:refresh",
+	footer := fmt.Sprintf("Last updated: %s │ q:quit r:refresh ↑↓:select enter:view",
 		snap.Timestamp.Format("15:04:05"))
+	b.WriteString(footerStyle.Render(footer))
+
+	return b.String()
+}
+
+func renderDetailView(session ClaudeSessionState, scrollOffset int) string {
+	var b strings.Builder
+
+	// Header
+	header := fmt.Sprintf("🤖 Claude Session: %s #%d - %s", session.Repo, session.PRNumber, session.Action)
+	b.WriteString(headerStyle.Render(header))
+	b.WriteString("\n")
+
+	// Duration
+	duration := formatDuration(session.Duration)
+	info := fmt.Sprintf("Running for: %s │ Output lines: %d", duration, len(session.Output))
+	b.WriteString(sectionStyle.Render(info))
+	b.WriteString("\n\n")
+
+	// Output window (last 40 lines or scrollable)
+	const maxLines = 40
+	startIdx := scrollOffset
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	// Clamp startIdx to valid range (prevent blank view when overscrolled)
+	if startIdx > len(session.Output)-maxLines && len(session.Output) > maxLines {
+		startIdx = len(session.Output) - maxLines
+	}
+	if startIdx > len(session.Output) {
+		startIdx = max(0, len(session.Output)-1)
+	}
+	endIdx := startIdx + maxLines
+	if endIdx > len(session.Output) {
+		endIdx = len(session.Output)
+	}
+
+	if len(session.Output) == 0 {
+		b.WriteString(emptyStyle.Render("  (No output yet)"))
+		b.WriteString("\n")
+	} else {
+		for i := startIdx; i < endIdx; i++ {
+			b.WriteString(session.Output[i])
+			b.WriteString("\n")
+		}
+
+		// Scroll indicator
+		if endIdx < len(session.Output) {
+			remaining := len(session.Output) - endIdx
+			b.WriteString(fmt.Sprintf("\n... %d more lines (press j/down to scroll) ...\n", remaining))
+		}
+	}
+
+	// Footer
+	b.WriteString("\n")
+	footer := "esc:back ↑↓:scroll g:top G:bottom q:quit"
 	b.WriteString(footerStyle.Render(footer))
 
 	return b.String()
@@ -134,17 +190,25 @@ func renderTree(repos []RepoState) string {
 	return b.String()
 }
 
-func renderSessions(sessions []ClaudeSessionState) string {
+func renderSessions(sessions []ClaudeSessionState, selectedIdx int) string {
 	if len(sessions) == 0 {
 		return emptyStyle.Render("  (No active Claude sessions)")
 	}
 
 	var b strings.Builder
-	for _, s := range sessions {
+	for i, s := range sessions {
 		duration := formatDuration(s.Duration)
-		line := fmt.Sprintf("• %s #%d - %s (%s)",
-			s.Repo, s.PRNumber, s.Action, duration)
-		b.WriteString(sessionStyle.Render(line))
+		marker := "•"
+		style := sessionStyle
+
+		if i == selectedIdx {
+			marker = "▶"
+			style = selectedSessionStyle
+		}
+
+		line := fmt.Sprintf("%s %s #%d - %s (%s)",
+			marker, s.Repo, s.PRNumber, s.Action, duration)
+		b.WriteString(style.Render(line))
 		b.WriteString("\n")
 	}
 
