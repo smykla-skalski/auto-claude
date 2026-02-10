@@ -18,7 +18,7 @@ func (w *Worker) resolveConflicts(ctx context.Context, wtDir string) error {
 	}
 
 	prompt := fmt.Sprintf(
-		"This branch has conflicts with %s. Run `git merge origin/%s`, resolve all conflicts, commit with -s -S flags, run checks (`golangci-lint run`, `go test ./...`, `go build ./cmd/auto-claude/`) and verify they pass, then push.",
+		"This branch has conflicts with %s. Run `git merge origin/%s`, resolve all conflicts, commit with -s -S flags, run checks (`golangci-lint run`, `go test ./...`, `go build ./cmd/auto-claude/`) and verify they all pass before pushing.",
 		w.repo.BaseBranch, w.repo.BaseBranch,
 	)
 
@@ -73,7 +73,7 @@ func (w *Worker) fixChecks(ctx context.Context, wtDir string) error {
 	}
 
 	prompt := fmt.Sprintf(
-		"CI checks failing: %s. Investigate failures, fix code, commit with -s -S flags, run checks (`golangci-lint run`, `go test ./...`, `go build ./cmd/auto-claude/`) and verify they pass, then push.",
+		"CI checks failing: %s. Investigate failures, fix code, commit with -s -S flags, run checks (`golangci-lint run`, `go test ./...`, `go build ./cmd/auto-claude/`) and verify they all pass before pushing.",
 		strings.Join(failing, ", "),
 	)
 
