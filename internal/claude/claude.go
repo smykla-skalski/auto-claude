@@ -24,6 +24,7 @@ func NewClient(model string, logger *slog.Logger) *Client {
 type Result struct {
 	Success      bool
 	Output       string
+	OutputFile   string
 	DurationMs   int
 	TotalCostUSD float64
 	SessionID    string
@@ -105,18 +106,27 @@ func (c *Client) RunCommand(ctx context.Context, workdir, outputDir, command str
 	cmd.Dir = workdir
 	out, err := cmd.CombinedOutput()
 
-	// Save full output to file
-	timestamp := time.Now().Format("20060102-150405")
+	// Save full output to file with high-resolution timestamp
+	now := time.Now()
+	timestamp := fmt.Sprintf("%s-%06d", now.Format("20060102-150405"), now.Nanosecond()/1000)
 	logFile := filepath.Join(outputDir, fmt.Sprintf("claude-%s-%s.log", command, timestamp))
-	if writeErr := os.WriteFile(logFile, out, 0644); writeErr != nil {
+
+	// Create output directory with restrictive permissions
+	if err := os.MkdirAll(outputDir, 0700); err != nil {
+		c.logger.Warn("failed to create output directory", "dir", outputDir, "err", err)
+	}
+
+	// Write log with owner-only permissions
+	if writeErr := os.WriteFile(logFile, out, 0600); writeErr != nil {
 		c.logger.Warn("failed to save claude output", "err", writeErr)
 	}
 
 	if err != nil {
 		c.logger.Error("claude command failed", "command", command, "output_file", logFile)
 		return &Result{
-			Success: false,
-			Output:  string(out),
+			Success:    false,
+			Output:     string(out),
+			OutputFile: logFile,
 		}, fmt.Errorf("claude command %s: %w\n%s", command, err, string(out))
 	}
 
@@ -133,6 +143,7 @@ func (c *Client) RunCommand(ctx context.Context, workdir, outputDir, command str
 		return &Result{
 			Success:      !resp.IsError,
 			Output:       resp.Result,
+			OutputFile:   logFile,
 			DurationMs:   resp.DurationMs,
 			TotalCostUSD: resp.TotalCostUSD,
 			SessionID:    resp.SessionID,
@@ -142,7 +153,8 @@ func (c *Client) RunCommand(ctx context.Context, workdir, outputDir, command str
 
 	c.logger.Info("claude completed (non-json response)", "output_file", logFile)
 	return &Result{
-		Success: true,
-		Output:  string(out),
+		Success:    true,
+		Output:     string(out),
+		OutputFile: logFile,
 	}, nil
 }

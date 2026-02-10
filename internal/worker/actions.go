@@ -218,6 +218,10 @@ func (w *Worker) fixReviews(ctx context.Context, wtDir string) error {
 			"applied", summary.Applied,
 			"questionable", summary.Questionable,
 			"invalid", summary.Invalid)
+	} else {
+		w.logger.Warn("failed to parse review fix summary",
+			"err", parseErr,
+			"output_file", result.OutputFile)
 	}
 
 	// Check if Claude actually created commits
@@ -233,6 +237,17 @@ func (w *Worker) fixReviews(ctx context.Context, wtDir string) error {
 				"total", summary.Total,
 				"questionable", summary.Questionable,
 				"invalid", summary.Invalid)
+
+			// Resolve threads even when no code changes applied
+			w.logger.Info("resolving copilot review threads", "count", len(unresolvedThreads))
+			for _, threadID := range unresolvedThreads {
+				if err := w.gh.ResolveReviewThread(ctx, threadID); err != nil {
+					w.logger.Error("failed to resolve thread", "thread_id", threadID, "err", err)
+					// Continue with other threads even if one fails
+				}
+			}
+
+			w.logger.Info("reviews marked as addressed with no code changes")
 			return nil // Success, not error
 		}
 		// Unexpected: skill should have created commits
