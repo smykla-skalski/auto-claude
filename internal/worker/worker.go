@@ -285,7 +285,8 @@ func (w *Worker) evaluate() state {
 	}
 
 	// Check branch protection approval (separate from Copilot review)
-	// reviewDecision is set by GitHub based on branch protection rules
+	// Uses ReviewDecision (branch protection) not MergeStateStatus (general blocking)
+	// because ReviewDecision specifically reflects required approval rules
 	if w.pr.ReviewDecision != "" && w.pr.ReviewDecision != "APPROVED" {
 		w.logger.Debug("reviews not approved; waiting before merge",
 			"reviewDecision", w.pr.ReviewDecision,
@@ -326,7 +327,7 @@ func (w *Worker) checkCopilotReviewStatus() copilotReviewStatus {
 	var hasCopilotReview bool
 	var hasUnresolvedComment bool
 
-	// Check top-level reviews for latest non-dismissed state
+	// Check top-level reviews for any non-dismissed Copilot review
 	for _, r := range w.cachedReviews {
 		if isCopilotAuthor(r.Author) {
 			// Only consider submitted reviews (ignore PENDING/DISMISSED)
