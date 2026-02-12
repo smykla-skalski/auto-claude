@@ -160,7 +160,29 @@ func (w *Worker) Run(ctx context.Context) error {
 			actionErr = w.fixChecks(ctx, wtDir)
 
 		case stateReviewsPending:
-			actionErr = w.fixReviews(ctx, wtDir)
+			// Check if we have Copilot reviews to fix
+			hasUnresolvedCopilot := false
+			for _, t := range w.cachedReviewThreads {
+				if t.IsResolved || t.IsOutdated {
+					continue
+				}
+				for _, c := range t.Comments {
+					if isCopilotAuthor(c.Author) {
+						hasUnresolvedCopilot = true
+						break
+					}
+				}
+				if hasUnresolvedCopilot {
+					break
+				}
+			}
+
+			if hasUnresolvedCopilot {
+				actionErr = w.fixReviews(ctx, wtDir)
+			} else {
+				// No Copilot reviews, just waiting for human reviews
+				actionErr = w.requestReview(ctx)
+			}
 
 		case stateChecksPending:
 			w.logger.Info("checks pending, waiting for next poll")
@@ -225,9 +247,30 @@ func (w *Worker) evaluate() state {
 		}
 	}
 
-	// If merge state is blocked, could be other review requirements
-	if w.pr.MergeStateStatus == "BLOCKED" {
+	// Check if reviews are approved
+	if w.pr.ReviewDecision != "APPROVED" {
+		w.logger.Debug("reviews not approved; waiting before merge",
+			"reviewDecision", w.pr.ReviewDecision,
+			"mergeStateStatus", w.pr.MergeStateStatus,
+			"mergeable", w.pr.Mergeable)
 		return stateReviewsPending
+	}
+
+	// Reviews approved, continue to ready check
+	w.logger.Debug("reviews approved", "reviewDecision", w.pr.ReviewDecision)
+
+	// Special handling for BEHIND: allow merge attempt which will trigger UpdateBranch
+	if w.pr.MergeStateStatus == "BEHIND" {
+		w.logger.Debug("PR behind base branch, will attempt merge to trigger update",
+			"mergeStateStatus", w.pr.MergeStateStatus)
+		return stateReady
+	}
+
+	if w.pr.MergeStateStatus != "CLEAN" {
+		w.logger.Debug("PR merge state not clean",
+			"mergeStateStatus", w.pr.MergeStateStatus,
+			"mergeable", w.pr.Mergeable)
+		return stateChecksPending
 	}
 
 	return stateReady

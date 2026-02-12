@@ -24,13 +24,19 @@ type ClaudeConfig struct {
 }
 
 type RepoConfig struct {
-	Owner                string   `yaml:"owner"`
-	Name                 string   `yaml:"name"`
-	BaseBranch           string   `yaml:"base_branch"`
-	ExcludeAuthors       []string `yaml:"exclude_authors"`
-	MergeMethod          string   `yaml:"merge_method"`
-	MaxConcurrentPRs     int      `yaml:"max_concurrent_prs"`
-	RequireCopilotReview *bool    `yaml:"require_copilot_review,omitempty"`
+	Owner                 string                 `yaml:"owner"`
+	Name                  string                 `yaml:"name"`
+	BaseBranch            string                 `yaml:"base_branch"`
+	ExcludeAuthors        []string               `yaml:"exclude_authors"`
+	MergeMethod           string                 `yaml:"merge_method"`
+	MaxConcurrentPRs      int                    `yaml:"max_concurrent_prs"`
+	RequireCopilotReview  *bool                  `yaml:"require_copilot_review,omitempty"`
+	ReviewRequestComment  *ReviewRequestComment  `yaml:"review_request_comment,omitempty"`
+}
+
+type ReviewRequestComment struct {
+	Enabled bool   `yaml:"enabled"`
+	Message string `yaml:"message"`
 }
 
 type LogConfig struct {
@@ -133,6 +139,9 @@ func (c *Config) validate() error {
 		case "squash", "merge":
 		default:
 			return fmt.Errorf("repos[%d]: invalid merge_method %q (squash|merge)", i, r.MergeMethod)
+		}
+		if r.ReviewRequestComment != nil && r.ReviewRequestComment.Enabled && r.ReviewRequestComment.Message == "" {
+			return fmt.Errorf("repos[%d]: review_request_comment.message required when enabled", i)
 		}
 	}
 	return nil

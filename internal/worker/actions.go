@@ -294,6 +294,36 @@ func (w *Worker) fixReviews(ctx context.Context, wtDir string) error {
 	return nil
 }
 
+func (w *Worker) requestReview(ctx context.Context) error {
+	if w.repo.ReviewRequestComment == nil || !w.repo.ReviewRequestComment.Enabled {
+		w.logger.Info("review request comments disabled, waiting for next poll")
+		return nil
+	}
+
+	// Check if already posted review request comment
+	const commentMarker = "<!-- auto-claude:review-request -->"
+	comments, err := w.gh.GetComments(ctx, w.repo.Owner, w.repo.Name, w.pr.Number)
+	if err != nil {
+		return fmt.Errorf("get comments: %w", err)
+	}
+
+	for _, comment := range comments {
+		if strings.Contains(comment, commentMarker) {
+			w.logger.Info("review request comment already posted, waiting for next poll")
+			return nil
+		}
+	}
+
+	// Post review request comment
+	message := w.repo.ReviewRequestComment.Message + "\n\n" + commentMarker
+	if err := w.gh.PostComment(ctx, w.repo.Owner, w.repo.Name, w.pr.Number, message); err != nil {
+		return fmt.Errorf("post comment: %w", err)
+	}
+
+	w.logger.Info("posted review request comment")
+	return nil
+}
+
 func (w *Worker) merge(ctx context.Context) error {
 	err := w.gh.MergePR(ctx, w.repo.Owner, w.repo.Name, w.pr.Number, w.repo.MergeMethod)
 	if err != nil && strings.Contains(err.Error(), "Base branch was modified") {
