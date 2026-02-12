@@ -75,7 +75,10 @@ func (c *Client) AddWorktree(ctx context.Context, owner, repo, branch string, pr
 	_ = c.run(ctx, wtDir, "git", "branch", "--set-upstream-to=origin/"+branch, branch)
 
 	// Ensure main clone is on detached HEAD to avoid branch conflicts
-	_ = c.run(ctx, cloneDir, "git", "checkout", "--detach", "HEAD")
+	if err := c.run(ctx, cloneDir, "git", "checkout", "--detach", "HEAD"); err != nil {
+		c.logger.Warn("failed to detach HEAD in main clone", "error", err)
+		return "", fmt.Errorf("detach HEAD: %w", err)
+	}
 
 	return wtDir, nil
 }

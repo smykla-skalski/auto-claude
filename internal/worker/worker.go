@@ -300,14 +300,22 @@ func (w *Worker) checkCopilotReviewStatus() copilotReviewStatus {
 	var hasApproval bool
 	var hasUnresolvedComment bool
 
-	// Check top-level reviews for approval
+	// Check top-level reviews for latest non-dismissed state
+	// Process reviews in order to find most recent Copilot review
+	var latestCopilotState string
 	for _, r := range w.cachedReviews {
 		if isCopilotAuthor(r.Author) {
-			hasCopilotReview = true
-			if r.State == "APPROVED" {
-				hasApproval = true
+			// Only consider submitted reviews (ignore PENDING/DISMISSED)
+			if r.State != "PENDING" && r.State != "DISMISSED" {
+				hasCopilotReview = true
+				latestCopilotState = r.State
 			}
 		}
+	}
+
+	// Only consider APPROVED if it's the latest state
+	if latestCopilotState == "APPROVED" {
+		hasApproval = true
 	}
 
 	// Check review threads (inline comments)
