@@ -1,7 +1,7 @@
 # 🤖 auto-claude
 
 [![CI](https://github.com/marcin-skalski/auto-claude/actions/workflows/ci.yaml/badge.svg)](https://github.com/marcin-skalski/auto-claude/actions/workflows/ci.yaml)
-[![Go Version](https://img.shields.io/badge/go-1.24.9-blue.svg)](https://go.dev)
+[![Go Version](https://img.shields.io/badge/go-1.26.0-blue.svg)](https://go.dev)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 GitHub PR automation that never sleeps. A daemon that monitors pull requests and autonomously manages their lifecycle using Claude Code CLI: resolves merge conflicts, fixes failing builds, addresses review comments, and merges when ready.
@@ -22,12 +22,12 @@ Born from frustration with Renovate PRs piling up. Built for teams that want PRs
 - 🤖 Copilot review gating (waits for Copilot approval before merging)
 - ⚡ Concurrent worker goroutines per PR (configurable limit)
 - 🎯 Intelligent skipping (drafts, on-hold/blocked labels, pending checks)
-- 🔄 Graceful error recovery (worker panics don't crash daemon)
+- 🔄 Graceful error handling for worker failures
 
 **Developer Experience**
 
 - 📊 Interactive TUI dashboard with real-time Claude output streaming
-- 📝 Dual logging: structured JSON for production, colored for development
+- 📝 Dual logging: structured logfmt (tint) for production, colored for development
 - 🔧 Per-repo configuration (exclude authors, merge methods, worker limits)
 - 🧹 Automatic worktree cleanup after worker completion
 
@@ -172,7 +172,7 @@ Each PR worker progresses through 6 states:
 └───────┘
 ```
 
-**Polling Model**: Daemon restarts worker on each poll cycle to evaluate fresh PR state. Workers take single action per invocation, then exit. This prevents stale state and allows concurrent PR processing.
+**Polling Model**: Daemon polls on a fixed interval and ensures a worker is running for each PR. If no worker is active, it starts one; each worker then loops, refreshing PR state and taking actions until it exits. This prevents stale state and allows concurrent PR processing.
 
 ## ⚙️ Configuration
 
@@ -336,10 +336,10 @@ AUTO_CLAUDE_TUI=0 ./auto-claude --config config.yaml
 **Headless Output:**
 
 ```
-{"time":"2024-01-15T10:23:45Z","level":"INFO","msg":"auto-claude starting","config":"config.yaml"}
-{"time":"2024-01-15T10:23:45Z","level":"INFO","msg":"daemon started","poll_interval":"60s","repos":2}
-{"time":"2024-01-15T10:23:46Z","level":"INFO","msg":"worker started","repo":"myorg/api-service","pr":123}
-{"time":"2024-01-15T10:24:50Z","level":"INFO","msg":"action completed","repo":"myorg/api-service","pr":123,"state":"checks_failing"}
+time="2024-01-15T10:23:45Z" level=INFO msg="auto-claude starting" config=config.yaml
+time="2024-01-15T10:23:45Z" level=INFO msg="daemon started" poll_interval=60s repos=2
+time="2024-01-15T10:23:46Z" level=INFO msg="worker started" repo=myorg/api-service pr=123
+time="2024-01-15T10:24:50Z" level=INFO msg="action completed" repo=myorg/api-service pr=123 state=checks_failing
 ```
 
 ### Development Mode
@@ -479,8 +479,12 @@ ps aux | grep claude
 # View worker logs
 tail -f /tmp/auto-claude/logs/auto-claude.log | grep "pr=123"
 
-# Check Claude output
-cat /tmp/auto-claude/myorg/myrepo/123/claude-*.log
+# Set to your configured workdir (see config.yaml)
+WORKDIR=/tmp/auto-claude
+
+# Check Claude output logs (stored inside the PR worktree)
+ls -la "$WORKDIR/worktrees/myorg-myrepo/pr-123/.auto-claude-logs"
+cat "$WORKDIR/worktrees/myorg-myrepo/pr-123/.auto-claude-logs"/claude-*.log 2>/dev/null
 ```
 
 **Fix:**
@@ -496,11 +500,15 @@ cat /tmp/auto-claude/myorg/myrepo/123/claude-*.log
 **Debug:**
 
 ```bash
-# Check Claude output logs
-cat /tmp/auto-claude/myorg/myrepo/123/claude-conflict-*.log
+# Set to your configured workdir (see config.yaml)
+WORKDIR=/tmp/auto-claude
 
-# Verify git worktree created
-ls -la /tmp/auto-claude/myorg/myrepo/123
+# Check Claude output logs (stored inside the PR worktree)
+ls -la "$WORKDIR/worktrees/myorg-myrepo/pr-123/.auto-claude-logs"
+cat "$WORKDIR/worktrees/myorg-myrepo/pr-123/.auto-claude-logs"/claude-conflict-*.log 2>/dev/null
+
+# Verify git worktree created (note: worktrees are cleaned up after the worker exits)
+ls -la "$WORKDIR/worktrees/myorg-myrepo/pr-123"
 
 # Check for new conflicts pushed to base branch
 gh pr view 123 --repo myorg/myrepo
@@ -514,19 +522,24 @@ gh pr view 123 --repo myorg/myrepo
 
 ### High Disk Usage
 
-**Cause**: Git worktrees accumulate in workdir (bug: cleanup not implemented yet)
+**Cause**: Large git clones or persistent log files
 
-**Temporary Fix:**
+**Debug:**
 
 ```bash
-# List worktrees
-du -sh /tmp/auto-claude/*/*
+# Check disk usage by component
+du -sh /tmp/auto-claude/clones/*/*
+du -sh /tmp/auto-claude/logs/*
+du -sh /tmp/auto-claude/worktrees/*/*
 
-# Remove worktrees for closed PRs manually
-rm -rf /tmp/auto-claude/myorg/myrepo/123
+# Note: Worktrees are automatically cleaned up after each worker exits
 ```
 
-**Permanent Fix**: Implement cleanup job in daemon (see CLAUDE.md "Extending Functionality")
+**Fix:**
+
+- Review log rotation settings in config
+- Consider cleaning up old clones if accumulating
+- Check for large files in worktree during active runs
 
 ### TUI Not Rendering
 
@@ -655,7 +668,7 @@ repos:
 ## ❓ FAQ
 
 **Q: Does auto-claude push commits to PR branches?**
-A: Yes. When resolving conflicts, fixing CI, or addressing reviews, it commits changes (signed with `-s -S`) and pushes to the PR's head branch.
+A: Yes. When resolving conflicts, fixing CI, or addressing reviews, it commits changes and pushes to the PR's head branch. It prompts Claude to use `-s -S` for sign-off and GPG signing, but does not itself enforce or verify that these flags were used.
 
 **Q: Can I run multiple instances for different repos?**
 A: No need. Use a single instance with multiple repos in `config.yaml`. Multiple instances would conflict on git worktrees.
@@ -682,7 +695,7 @@ A: Yes. Merge attempts honor required reviews, status checks, and other GitHub p
 A: No. It only manages existing PRs opened by humans or bots (Renovate, Dependabot, etc.).
 
 **Q: What's the GitHub API overhead?**
-A: Minimal. One API call per repo per poll cycle to list open PRs. Workers make additional calls only when taking action.
+A: Typically low. Each poll cycle makes one API call per repo to list open PRs. When `require_copilot_review: true` is enabled, the daemon also fetches reviews (and, when available, review threads) for each open PR on every poll to compute Copilot review status. Workers make additional calls only when taking action (for example, updating branches, commenting, or merging).
 
 ## 📄 License & Credits
 
