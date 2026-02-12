@@ -108,12 +108,16 @@ func (w *Worker) Run(ctx context.Context) error {
 		w.pr = *pr
 
 		// Fetch reviews and review threads for Copilot review status (only if required and not Renovate)
-		w.logger.Debug("copilot review check",
-			"require_copilot_review", *w.repo.RequireCopilotReview,
-			"is_renovate", isRenovateAuthor(w.pr.Author.Login),
-			"author", w.pr.Author.Login)
+		requireCopilot := w.repo.RequireCopilotReview != nil && *w.repo.RequireCopilotReview
+		isRenovate := isRenovateAuthor(w.pr.Author.Login)
 
-		if *w.repo.RequireCopilotReview && !isRenovateAuthor(w.pr.Author.Login) {
+		w.logger.Debug("copilot review check",
+			"require_copilot_review", requireCopilot,
+			"is_renovate", isRenovate,
+			"author", w.pr.Author.Login,
+			"config_ptr_nil", w.repo.RequireCopilotReview == nil)
+
+		if requireCopilot && !isRenovate {
 			reviews, err := w.gh.GetReviews(ctx, w.repo.Owner, w.repo.Name, w.pr.Number)
 			if err != nil {
 				w.logger.Error("failed to get reviews", "err", err)
@@ -143,6 +147,15 @@ func (w *Worker) Run(ctx context.Context) error {
 				w.cachedReviewThreads = threads
 			} else {
 				w.cachedReviewThreads = nil
+			}
+		} else {
+			// Reviews not required or Renovate PR - clear cached reviews
+			w.cachedReviews = nil
+			w.cachedReviewThreads = nil
+			if !isRenovate && !requireCopilot {
+				w.logger.Warn("copilot review check skipped unexpectedly",
+					"require_copilot_review", requireCopilot,
+					"config_ptr", w.repo.RequireCopilotReview)
 			}
 		}
 
@@ -239,12 +252,25 @@ func (w *Worker) evaluate() state {
 	}
 
 	// Check review status before merging (if required and not Renovate)
-	w.logger.Debug("evaluate copilot requirement",
-		"require_copilot_review", *w.repo.RequireCopilotReview,
-		"is_renovate", isRenovateAuthor(w.pr.Author.Login),
-		"author", w.pr.Author.Login)
+	requireCopilot := w.repo.RequireCopilotReview != nil && *w.repo.RequireCopilotReview
+	isRenovate := isRenovateAuthor(w.pr.Author.Login)
 
-	if *w.repo.RequireCopilotReview && !isRenovateAuthor(w.pr.Author.Login) {
+	w.logger.Debug("evaluate copilot requirement",
+		"require_copilot_review", requireCopilot,
+		"is_renovate", isRenovate,
+		"author", w.pr.Author.Login,
+		"cached_reviews_count", len(w.cachedReviews),
+		"cached_threads_count", len(w.cachedReviewThreads))
+
+	if requireCopilot && !isRenovate {
+		// Safety check: ensure reviews were fetched
+		if w.cachedReviews == nil {
+			w.logger.Error("copilot review required but reviews not fetched - blocking merge",
+				"pr", w.pr.Number,
+				"author", w.pr.Author.Login)
+			return stateChecksPending
+		}
+
 		copilotStatus := w.checkCopilotReviewStatus()
 		w.logger.Debug("copilot review status", "status", copilotStatus)
 		switch copilotStatus {
