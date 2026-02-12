@@ -233,7 +233,7 @@ func (w *Worker) evaluate() state {
 		}
 	}
 
-	// Check Copilot review status before merging (if required and not Renovate)
+	// Check review status before merging (if required and not Renovate)
 	if *w.repo.RequireCopilotReview && !isRenovateAuthor(w.pr.Author.Login) {
 		copilotStatus := w.checkCopilotReviewStatus()
 		switch copilotStatus {
@@ -245,19 +245,19 @@ func (w *Worker) evaluate() state {
 		case copilotResolved:
 			// Continue to merge readiness check
 		}
-	}
 
-	// Check if reviews are approved
-	if w.pr.ReviewDecision != "APPROVED" {
-		w.logger.Debug("reviews not approved; waiting before merge",
-			"reviewDecision", w.pr.ReviewDecision,
-			"mergeStateStatus", w.pr.MergeStateStatus,
-			"mergeable", w.pr.Mergeable)
-		return stateReviewsPending
-	}
+		// Check if reviews are approved (only when reviews required)
+		if w.pr.ReviewDecision != "APPROVED" {
+			w.logger.Debug("reviews not approved; waiting before merge",
+				"reviewDecision", w.pr.ReviewDecision,
+				"mergeStateStatus", w.pr.MergeStateStatus,
+				"mergeable", w.pr.Mergeable)
+			return stateReviewsPending
+		}
 
-	// Reviews approved, continue to ready check
-	w.logger.Debug("reviews approved", "reviewDecision", w.pr.ReviewDecision)
+		// Reviews approved, continue to ready check
+		w.logger.Debug("reviews approved", "reviewDecision", w.pr.ReviewDecision)
+	}
 
 	// Special handling for BEHIND: allow merge attempt which will trigger UpdateBranch
 	if w.pr.MergeStateStatus == "BEHIND" {
