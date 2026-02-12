@@ -546,7 +546,9 @@ func inferStatesFromPR(pr github.PRInfo, requireCopilot bool, hasCopilotReview b
 		}
 	}
 
-	if pr.MergeStateStatus == "BLOCKED" {
+	// Use ReviewDecision (consistent with worker merge gating in worker.go:290)
+	// instead of MergeStateStatus which can be BLOCKED for non-review reasons
+	if pr.ReviewDecision != "" && pr.ReviewDecision != "APPROVED" {
 		states = append(states, "reviews_pending")
 	}
 
