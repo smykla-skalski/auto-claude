@@ -6,12 +6,15 @@ claude:
   model: sonnet
 
 repos:
-  - owner: automaat
+  - owner: smykla-skalski
     name: auto-claude
     base_branch: main
     merge_method: squash
     max_concurrent_prs: 3
     require_copilot_review: true
+    review_request_comment:
+      enabled: true
+      message: "approve"
   - owner: automaat
     name: ai-casino
     base_branch: main

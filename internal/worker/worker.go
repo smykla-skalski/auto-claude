@@ -160,7 +160,29 @@ func (w *Worker) Run(ctx context.Context) error {
 			actionErr = w.fixChecks(ctx, wtDir)
 
 		case stateReviewsPending:
-			actionErr = w.fixReviews(ctx, wtDir)
+			// Check if we have Copilot reviews to fix
+			hasUnresolvedCopilot := false
+			for _, t := range w.cachedReviewThreads {
+				if t.IsResolved || t.IsOutdated {
+					continue
+				}
+				for _, c := range t.Comments {
+					if isCopilotAuthor(c.Author) {
+						hasUnresolvedCopilot = true
+						break
+					}
+				}
+				if hasUnresolvedCopilot {
+					break
+				}
+			}
+
+			if hasUnresolvedCopilot {
+				actionErr = w.fixReviews(ctx, wtDir)
+			} else {
+				// No Copilot reviews, just waiting for human reviews
+				actionErr = w.requestReview(ctx)
+			}
 
 		case stateChecksPending:
 			w.logger.Info("checks pending, waiting for next poll")
@@ -225,9 +247,23 @@ func (w *Worker) evaluate() state {
 		}
 	}
 
-	// If merge state is blocked, could be other review requirements
-	if w.pr.MergeStateStatus == "BLOCKED" {
+	// Check if reviews are approved
+	if w.pr.ReviewDecision == "APPROVED" {
+		// Reviews approved, continue to ready check
+		w.logger.Debug("reviews approved", "reviewDecision", w.pr.ReviewDecision)
+	} else if w.pr.MergeStateStatus == "BLOCKED" {
+		w.logger.Debug("PR blocked by GitHub",
+			"mergeStateStatus", w.pr.MergeStateStatus,
+			"reviewDecision", w.pr.ReviewDecision,
+			"mergeable", w.pr.Mergeable)
 		return stateReviewsPending
+	}
+
+	if w.pr.MergeStateStatus != "CLEAN" {
+		w.logger.Debug("PR merge state not clean",
+			"mergeStateStatus", w.pr.MergeStateStatus,
+			"mergeable", w.pr.Mergeable)
+		return stateChecksPending
 	}
 
 	return stateReady
