@@ -153,6 +153,42 @@ tmux attach -t auto-claude-myorg-myrepo-pr-123
 tail -f /tmp/auto-claude/worktrees/myorg-myrepo/pr-123/.auto-claude-logs/tmux-auto-claude-myorg-myrepo-pr-123.log
 ```
 
+### Completion Detection
+
+**Stop hook integration:**
+
+- Global hook: `~/.claude/hooks/mark-session-end.sh` - writes marker when Claude finishes
+- Global config: `~/.claude/settings.json` - registers Stop hook
+- Marker location: `~/.auto-claude/markers/{session-name}.marker`
+- Daemon polls marker file (1s interval)
+- When marker detected, daemon sends Ctrl-D to exit Claude
+- Exit status captured from tmux pane using `remain-on-exit` option
+
+**Flow:**
+
+```
+Claude processes prompt
+  ↓
+Stop hook fires (Claude finished response)
+  ↓
+Hook writes .auto-claude-session-end marker
+  ↓
+Daemon detects marker
+  ↓
+Daemon sends Ctrl-D to exit Claude
+  ↓
+Daemon captures exit code from pane
+  ↓
+Session cleaned up
+```
+
+**Advantages over idle detection:**
+
+- Deterministic - fires exactly when Claude finishes
+- No false positives from slow operations
+- No arbitrary timeout thresholds
+- Integrates with Claude's native hook system
+
 ### Benefits
 
 - **Full interactivity:** Claude runs in normal interactive mode, not JSON streaming
@@ -161,6 +197,7 @@ tail -f /tmp/auto-claude/worktrees/myorg-myrepo/pr-123/.auto-claude-logs/tmux-au
 - **Debugging:** Attach when worker stuck to see what Claude is waiting for
 - **Persistent logs:** Full output captured via periodic tmux capture-pane snapshots for later review
 - **Session persistence:** Can attach/detach without interrupting Claude's work
+- **Reliable completion:** Stop hook guarantees detection when Claude finishes
 
 ### Cleanup
 

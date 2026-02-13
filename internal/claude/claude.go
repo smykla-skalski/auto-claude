@@ -168,6 +168,7 @@ func (c *Client) RunInTmux(ctx context.Context, sessionName, workdir, prompt str
 
 	// Build tmux command with proper terminal settings for Claude TUI
 	// Start Claude in interactive mode WITHOUT -p flag to get full TUI
+	// Pass session name via env var so Stop hook can create marker with correct name
 	tmuxArgs := []string{
 		"new-session", "-d",
 		"-s", sessionName,
@@ -175,6 +176,7 @@ func (c *Client) RunInTmux(ctx context.Context, sessionName, workdir, prompt str
 		"-x", "200", // width
 		"-y", "50",  // height
 		"-e", "TERM=screen-256color",
+		"-e", "AUTO_CLAUDE_SESSION=" + sessionName,
 		"claude", "--model", c.model, "--dangerously-skip-permissions",
 	}
 
@@ -185,6 +187,12 @@ func (c *Client) RunInTmux(ctx context.Context, sessionName, workdir, prompt str
 			Success: false,
 			Output:  string(out),
 		}, fmt.Errorf("create tmux session: %w\n%s", err, string(out))
+	}
+
+	// Enable remain-on-exit to capture exit status after Claude closes
+	remainCmd := exec.CommandContext(ctx, "tmux", "set-option", "-t", sessionName, "remain-on-exit", "on")
+	if err := remainCmd.Run(); err != nil {
+		c.logger.Warn("failed to set remain-on-exit", "err", err)
 	}
 
 	// Wait for Claude TUI to initialize and show confirmation prompt
@@ -221,16 +229,16 @@ func (c *Client) RunInTmux(ctx context.Context, sessionName, workdir, prompt str
 		c.logger.Warn("failed to send Enter to tmux", "err", err)
 	}
 
-	// Start goroutine to capture output from tmux scrollback buffer
+	// Start goroutine to capture output
 	if callback != nil {
 		go c.captureFromTmux(ctx, sessionName, callback)
 	}
 
-	// Also save output to log file periodically
+	// Save output to log file periodically
 	go c.savePeriodicSnapshot(ctx, sessionName, logFile)
 
-	// Wait for session to complete
-	return c.waitForTmuxSession(ctx, sessionName, logFile)
+	// Wait for session to complete (monitors marker file from Stop hook)
+	return c.waitForTmuxSession(ctx, sessionName, workdir, logFile)
 }
 
 // captureFromTmux captures output from tmux pane scrollback and streams to callback
@@ -289,43 +297,92 @@ func (c *Client) savePeriodicSnapshot(ctx context.Context, sessionName, logFile 
 	}
 }
 
-// waitForTmuxSession polls tmux until session exits
-func (c *Client) waitForTmuxSession(ctx context.Context, sessionName, logFile string) (*Result, error) {
+// waitForTmuxSession polls for Stop hook marker file, then exits Claude and captures status
+func (c *Client) waitForTmuxSession(ctx context.Context, sessionName, workdir, logFile string) (*Result, error) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
+
+	// Marker written to ~/.auto-claude/markers/{session-name}.marker by Stop hook
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		homeDir = os.Getenv("HOME")
+	}
+	markerPath := filepath.Join(homeDir, ".auto-claude", "markers", sessionName+".marker")
+	var exitSent bool
 
 	for {
 		select {
 		case <-ctx.Done():
 			// Kill session on context cancellation
 			_ = exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+			_ = os.Remove(markerPath)
 			return &Result{Success: false, Output: "cancelled"}, ctx.Err()
 		case <-ticker.C:
-			// Check if session still exists
-			cmd := exec.Command("tmux", "has-session", "-t", sessionName)
-			if err := cmd.Run(); err != nil {
-				// Session exited, read full log
-				out, readErr := os.ReadFile(logFile)
-				if readErr != nil {
-					return &Result{
-						Success:    false,
-						Output:     "",
-						OutputFile: logFile,
-					}, fmt.Errorf("read log file: %w", readErr)
+			// Check for completion marker from Stop hook
+			if !exitSent {
+				if _, err := os.Stat(markerPath); err == nil {
+					// Marker exists - Claude finished processing
+					c.logger.Debug("claude completed (stop hook fired), sending exit", "session", sessionName, "marker", markerPath)
+
+					// Send Ctrl-D to exit Claude gracefully
+					exitCmd := exec.CommandContext(ctx, "tmux", "send-keys", "-t", sessionName, "C-d")
+					if err := exitCmd.Run(); err != nil {
+						c.logger.Warn("failed to send exit to tmux", "err", err)
+					}
+
+					exitSent = true
+					_ = os.Remove(markerPath) // Clean up marker
+				}
+				continue
+			}
+
+			// After exit sent, wait for pane to die
+			statusCmd := exec.Command("tmux", "display-message", "-t", sessionName, "-p", "#{pane_dead}")
+			statusOut, err := statusCmd.Output()
+			if err != nil {
+				// Session might be completely gone - expected after exit
+				return c.readFinalResult(logFile, 0)
+			}
+
+			isDead := strings.TrimSpace(string(statusOut)) == "1"
+			if isDead {
+				// Pane is dead, get exit status
+				exitCodeCmd := exec.Command("tmux", "display-message", "-t", sessionName, "-p", "#{pane_dead_status}")
+				exitOut, err := exitCodeCmd.Output()
+
+				var exitCode int
+				if err == nil {
+					fmt.Sscanf(string(exitOut), "%d", &exitCode)
 				}
 
-				// Interactive mode - check for errors in output
-				output := string(out)
-				success := !strings.Contains(output, "Error:") && !strings.Contains(output, "error:")
+				// Clean up session
+				_ = exec.Command("tmux", "kill-session", "-t", sessionName).Run()
 
-				return &Result{
-					Success:    success,
-					Output:     output,
-					OutputFile: logFile,
-				}, nil
+				return c.readFinalResult(logFile, exitCode)
 			}
 		}
 	}
+}
+
+// readFinalResult reads log file and determines success based on exit code
+func (c *Client) readFinalResult(logFile string, exitCode int) (*Result, error) {
+	out, readErr := os.ReadFile(logFile)
+	if readErr != nil {
+		return &Result{
+			Success:    false,
+			Output:     "",
+			OutputFile: logFile,
+		}, fmt.Errorf("read log file: %w", readErr)
+	}
+
+	// Success if exit code is 0
+	success := exitCode == 0
+
+	return &Result{
+		Success:    success,
+		Output:     string(out),
+		OutputFile: logFile,
+	}, nil
 }
 
 // RunWithCallback spawns Claude with live output streaming via callback
