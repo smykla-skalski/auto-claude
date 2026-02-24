@@ -8,7 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/marcin-skalski/auto-claude/internal/claude"
 	"github.com/marcin-skalski/auto-claude/internal/config"
 	"github.com/marcin-skalski/auto-claude/internal/daemon"

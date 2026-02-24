@@ -3,7 +3,7 @@ package tui
 import (
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 type SnapshotProvider interface {
@@ -40,20 +40,17 @@ func NewModel(provider SnapshotProvider, refreshInterval time.Duration) Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(
-		tickCmd(m.refreshInterval),
-		tea.EnterAltScreen,
-	)
+	return tickCmd(m.refreshInterval)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch m.mode {
 		case viewModeList:
 			switch msg.String() {
 			case "q", "ctrl+c":
-				return m, tea.Quit
+				return m, func() tea.Msg { return tea.QuitMsg{} }
 			case "r":
 				// Manual refresh
 				m.snapshot = m.provider.GetSnapshot()
@@ -83,7 +80,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case viewModeDetail:
 			switch msg.String() {
 			case "q", "ctrl+c":
-				return m, tea.Quit
+				return m, func() tea.Msg { return tea.QuitMsg{} }
 			case "esc":
 				// Return to list view
 				m.mode = viewModeList
@@ -143,17 +140,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) View() string {
+func (m Model) View() tea.View {
+	var content string
 	switch m.mode {
 	case viewModeList:
-		return renderListView(m.snapshot, m.selectedSession)
+		content = renderListView(m.snapshot, m.selectedSession)
 	case viewModeDetail:
 		if m.selectedSession >= 0 && m.selectedSession < len(m.snapshot.ClaudeSessions) {
-			return renderDetailView(m.snapshot.ClaudeSessions[m.selectedSession], m.scrollOffset)
+			content = renderDetailView(m.snapshot.ClaudeSessions[m.selectedSession], m.scrollOffset)
+		} else {
+			content = renderListView(m.snapshot, m.selectedSession)
 		}
-		return renderListView(m.snapshot, m.selectedSession)
+	default:
+		content = renderListView(m.snapshot, m.selectedSession)
 	}
-	return renderListView(m.snapshot, m.selectedSession)
+	v := tea.NewView(content)
+	v.AltScreen = true
+	return v
 }
 
 func tickCmd(interval time.Duration) tea.Cmd {
