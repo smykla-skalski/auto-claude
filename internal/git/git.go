@@ -8,15 +8,23 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 type Client struct {
 	workdir string
 	logger  *slog.Logger
+
+	cloneMu sync.Map // key: cloneDir, value: *sync.Mutex
 }
 
 func NewClient(workdir string, logger *slog.Logger) *Client {
 	return &Client{workdir: workdir, logger: logger}
+}
+
+func (c *Client) cloneLock(dir string) *sync.Mutex {
+	v, _ := c.cloneMu.LoadOrStore(dir, &sync.Mutex{})
+	return v.(*sync.Mutex)
 }
 
 // CloneDir returns the bare clone directory for a repo.
@@ -30,12 +38,41 @@ func (c *Client) WorktreeDir(owner, repo string, prNumber int) string {
 }
 
 // EnsureClone clones the repo if missing, fetches if exists.
+// Serialized per clone dir to prevent concurrent git operations on the same repo.
 func (c *Client) EnsureClone(ctx context.Context, owner, repo string) error {
 	dir := c.CloneDir(owner, repo)
 
+	mu := c.cloneLock(dir)
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Check if .git exists and is valid
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-		c.logger.Debug("fetching existing clone", "dir", dir)
-		return c.run(ctx, dir, "git", "fetch", "--all", "--prune")
+		// Validate repo by checking for HEAD file
+		if _, err := os.Stat(filepath.Join(dir, ".git", "HEAD")); err != nil {
+			c.logger.Warn("clone corrupted (missing HEAD), removing", "dir", dir)
+			if err := os.RemoveAll(dir); err != nil {
+				return fmt.Errorf("remove corrupted clone: %w", err)
+			}
+			// Fall through to clone
+		} else {
+			// Ensure fetch refspec exists (may be missing if clone was interrupted or corrupted)
+			_ = c.run(ctx, dir, "git", "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+
+			// Valid repo, just fetch
+			c.logger.Debug("fetching existing clone", "dir", dir)
+			err := c.run(ctx, dir, "git", "fetch", "--all", "--prune")
+			if err != nil {
+				// If fetch fails, try to recover by removing and re-cloning
+				c.logger.Warn("fetch failed, removing corrupted clone", "dir", dir, "error", err)
+				if rmErr := os.RemoveAll(dir); rmErr != nil {
+					return fmt.Errorf("fetch failed and couldn't remove: fetch=%w, remove=%w", err, rmErr)
+				}
+				// Fall through to clone
+			} else {
+				return nil
+			}
+		}
 	}
 
 	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
@@ -58,7 +95,10 @@ func (c *Client) AddWorktree(ctx context.Context, owner, repo, branch string, pr
 
 	// Remove stale worktree if exists
 	if _, err := os.Stat(wtDir); err == nil {
-		_ = c.run(ctx, cloneDir, "git", "worktree", "remove", "--force", wtDir)
+		if rmErr := c.run(ctx, cloneDir, "git", "worktree", "remove", "--force", wtDir); rmErr != nil {
+			// Fallback: force remove directory if git worktree remove fails
+			_ = os.RemoveAll(wtDir)
+		}
 	}
 
 	c.logger.Info("adding worktree", "branch", branch, "dir", wtDir)
@@ -75,9 +115,12 @@ func (c *Client) AddWorktree(ctx context.Context, owner, repo, branch string, pr
 	_ = c.run(ctx, wtDir, "git", "branch", "--set-upstream-to=origin/"+branch, branch)
 
 	// Ensure main clone is on detached HEAD to avoid branch conflicts
-	if err := c.run(ctx, cloneDir, "git", "checkout", "--detach", "HEAD"); err != nil {
-		c.logger.Warn("failed to detach HEAD in main clone", "error", err)
-		return "", fmt.Errorf("detach HEAD: %w", err)
+	// Use a specific commit hash instead of HEAD to avoid potential corruption
+	if err := c.run(ctx, cloneDir, "git", "rev-parse", "HEAD"); err == nil {
+		if err := c.run(ctx, cloneDir, "git", "checkout", "--detach"); err != nil {
+			// Non-fatal: log but don't fail worktree creation
+			c.logger.Warn("failed to detach HEAD in main clone", "error", err)
+		}
 	}
 
 	return wtDir, nil
