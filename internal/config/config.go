@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -20,18 +21,20 @@ type Config struct {
 }
 
 type ClaudeConfig struct {
-	Model string `yaml:"model"`
+	Model             string `yaml:"model"`
+	UseTmux           bool   `yaml:"use_tmux"`
+	TmuxSessionPrefix string `yaml:"tmux_session_prefix"`
 }
 
 type RepoConfig struct {
-	Owner                 string                 `yaml:"owner"`
-	Name                  string                 `yaml:"name"`
-	BaseBranch            string                 `yaml:"base_branch"`
-	ExcludeAuthors        []string               `yaml:"exclude_authors"`
-	MergeMethod           string                 `yaml:"merge_method"`
-	MaxConcurrentPRs      int                    `yaml:"max_concurrent_prs"`
-	RequireCopilotReview  *bool                  `yaml:"require_copilot_review,omitempty"`
-	ReviewRequestComment  *ReviewRequestComment  `yaml:"review_request_comment,omitempty"`
+	Owner                string                `yaml:"owner"`
+	Name                 string                `yaml:"name"`
+	BaseBranch           string                `yaml:"base_branch"`
+	ExcludeAuthors       []string              `yaml:"exclude_authors"`
+	MergeMethod          string                `yaml:"merge_method"`
+	MaxConcurrentPRs     int                   `yaml:"max_concurrent_prs"`
+	RequireCopilotReview *bool                 `yaml:"require_copilot_review,omitempty"`
+	ReviewRequestComment *ReviewRequestComment `yaml:"review_request_comment,omitempty"`
 }
 
 type ReviewRequestComment struct {
@@ -88,6 +91,15 @@ func (c *Config) setDefaults() error {
 	}
 	if c.Claude.Model == "" {
 		c.Claude.Model = "opus"
+	}
+	if c.Claude.TmuxSessionPrefix == "" {
+		c.Claude.TmuxSessionPrefix = "auto-claude"
+	}
+	// Validate tmux availability if use_tmux is enabled
+	if c.Claude.UseTmux {
+		if _, err := exec.LookPath("tmux"); err != nil {
+			return fmt.Errorf("use_tmux is enabled but tmux is not installed or not in PATH: %w", err)
+		}
 	}
 	if c.Log.Level == "" {
 		c.Log.Level = "info"

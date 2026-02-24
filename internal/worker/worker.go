@@ -49,12 +49,12 @@ type Worker struct {
 	cachedReviews       []github.Review
 	cachedReviewThreads []github.ReviewThread
 
-	onClaudeStart  func(action string)
+	onClaudeStart  func(action, tmuxSession string)
 	onClaudeEnd    func()
 	onClaudeOutput func(line string)
 }
 
-func New(repo config.RepoConfig, pr github.PRInfo, gh *github.Client, cl *claude.Client, g *git.Client, logger *slog.Logger, onClaudeStart func(action string), onClaudeEnd func(), onClaudeOutput func(line string)) *Worker {
+func New(repo config.RepoConfig, pr github.PRInfo, gh *github.Client, cl *claude.Client, g *git.Client, logger *slog.Logger, onClaudeStart func(action, tmuxSession string), onClaudeEnd func(), onClaudeOutput func(line string)) *Worker {
 	return &Worker{
 		repo:           repo,
 		pr:             pr,

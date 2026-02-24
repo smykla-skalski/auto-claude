@@ -16,12 +16,13 @@ import (
 )
 
 type claudeSession struct {
-	repo     string
-	prNumber int
-	action   string
-	started  time.Time
-	mu       sync.Mutex
-	output   []string // Live output lines (thread-safe with mu)
+	repo        string
+	prNumber    int
+	action      string
+	started     time.Time
+	tmuxSession string // empty if tmux not enabled
+	mu          sync.Mutex
+	output      []string // Live output lines (thread-safe with mu)
 }
 
 type Daemon struct {
@@ -254,8 +255,8 @@ func (d *Daemon) startWorker(ctx context.Context, repo config.RepoConfig, pr git
 	d.mu.Unlock()
 
 	repoFullName := repo.Owner + "/" + repo.Name
-	onClaudeStart := func(action string) {
-		d.trackClaudeStart(key, repoFullName, pr.Number, action)
+	onClaudeStart := func(action, tmuxSession string) {
+		d.trackClaudeStart(key, repoFullName, pr.Number, action, tmuxSession)
 	}
 	onClaudeEnd := func() {
 		d.trackClaudeEnd(key)
@@ -319,15 +320,16 @@ func isExcluded(author string, excluded []string) bool {
 	return false
 }
 
-func (d *Daemon) trackClaudeStart(key string, repo string, prNumber int, action string) {
+func (d *Daemon) trackClaudeStart(key string, repo string, prNumber int, action string, tmuxSession string) {
 	d.sessionsMu.Lock()
 	defer d.sessionsMu.Unlock()
 	d.claudeSessions[key] = &claudeSession{
-		repo:     repo,
-		prNumber: prNumber,
-		action:   action,
-		started:  time.Now(),
-		output:   make([]string, 0, 100),
+		repo:        repo,
+		prNumber:    prNumber,
+		action:      action,
+		started:     time.Now(),
+		tmuxSession: tmuxSession,
+		output:      make([]string, 0, 100),
 	}
 }
 
@@ -396,11 +398,12 @@ func (d *Daemon) GetSnapshot() tui.Snapshot {
 		s.mu.Unlock()
 
 		sessions = append(sessions, tui.ClaudeSessionState{
-			Repo:     s.repo,
-			PRNumber: s.prNumber,
-			Action:   s.action,
-			Duration: time.Since(s.started).Round(time.Second),
-			Output:   outputCopy,
+			Repo:        s.repo,
+			PRNumber:    s.prNumber,
+			Action:      s.action,
+			Duration:    time.Since(s.started).Round(time.Second),
+			Output:      outputCopy,
+			TmuxSession: s.tmuxSession,
 		})
 	}
 	d.sessionsMu.Unlock()

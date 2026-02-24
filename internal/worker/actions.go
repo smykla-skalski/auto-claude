@@ -18,11 +18,12 @@ func (w *Worker) resolveConflicts(ctx context.Context, wtDir string) error {
 	}
 
 	prompt := fmt.Sprintf(
-		"This branch has conflicts with %s. Run `git merge origin/%s`, resolve all conflicts, commit with -s -S flags. Before pushing, run these checks and confirm each passes: `golangci-lint run`, `go test ./...`, `go build ./cmd/auto-claude/`.",
+		"This branch has conflicts with %s. Run `git merge origin/%s`, resolve all conflicts, commit with -s -S flags. Before pushing, determine the appropriate build/test commands for this project and verify the changes don't break anything.",
 		w.repo.BaseBranch, w.repo.BaseBranch,
 	)
 
-	w.onClaudeStart("resolving_conflicts")
+	tmuxSession := w.claude.GenerateTmuxSessionName(wtDir)
+	w.onClaudeStart("resolving_conflicts", tmuxSession)
 	endCalled := false
 	defer func() {
 		if !endCalled {
@@ -73,11 +74,12 @@ func (w *Worker) fixChecks(ctx context.Context, wtDir string) error {
 	}
 
 	prompt := fmt.Sprintf(
-		"CI checks failing: %s. Investigate failures, fix code, commit with -s -S flags. Before pushing, run these checks and confirm each passes: `golangci-lint run`, `go test ./...`, `go build ./cmd/auto-claude/`.",
+		"CI checks failing: %s. Investigate failures by looking at the GitHub Actions logs, fix the root cause, commit with -s -S flags. Before pushing, determine and run the appropriate build/test commands for this project to verify the fix.",
 		strings.Join(failing, ", "),
 	)
 
-	w.onClaudeStart("fixing_checks")
+	tmuxSession := w.claude.GenerateTmuxSessionName(wtDir)
+	w.onClaudeStart("fixing_checks", tmuxSession)
 	endCalled := false
 	defer func() {
 		if !endCalled {
@@ -208,7 +210,8 @@ func (w *Worker) fixReviews(ctx context.Context, wtDir string) error {
 		return fmt.Errorf("create output dir: %w", err)
 	}
 
-	w.onClaudeStart("fixing_reviews")
+	tmuxSession := w.claude.GenerateTmuxSessionName(wtDir)
+	w.onClaudeStart("fixing_reviews", tmuxSession)
 	endCalled := false
 	defer func() {
 		if !endCalled {

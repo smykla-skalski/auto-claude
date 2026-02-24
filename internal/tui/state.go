@@ -26,9 +26,10 @@ type PRState struct {
 }
 
 type ClaudeSessionState struct {
-	Repo     string
-	PRNumber int
-	Action   string
-	Duration time.Duration
-	Output   []string
+	Repo        string
+	PRNumber    int
+	Action      string
+	Duration    time.Duration
+	Output      []string
+	TmuxSession string // empty if tmux not enabled
 }
