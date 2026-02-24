@@ -1,6 +1,10 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"image/color"
+
+	"charm.land/lipgloss/v2"
+)
 
 var (
 	// State colors
@@ -74,7 +78,7 @@ func stateIcon(state string) string {
 	}
 }
 
-func stateColor(state string) lipgloss.Color {
+func stateColor(state string) color.Color {
 	switch state {
 	case "draft":
 		return colorDraft
