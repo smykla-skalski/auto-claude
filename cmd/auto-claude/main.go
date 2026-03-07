@@ -41,7 +41,7 @@ func main() {
 	}
 
 	gh := github.NewClient(logger)
-	cl := claude.NewClient(cfg.Claude.Model, logger)
+	cl := claude.NewClient(cfg.Claude.Model, cfg.Claude.UseTmux, cfg.Claude.TmuxSessionPrefix, logger)
 	g := git.NewClient(cfg.Workdir, logger)
 
 	d := daemon.New(cfg, gh, cl, g, logger)
