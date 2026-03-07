@@ -9,7 +9,7 @@ require (
 	charm.land/lipgloss/v2 v2.0.0
 	github.com/lmittmann/tint v1.1.3
 	github.com/mattn/go-isatty v0.0.20
-	github.com/mattn/go-runewidth v0.0.20
+	github.com/mattn/go-runewidth v0.0.21
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 )
 
