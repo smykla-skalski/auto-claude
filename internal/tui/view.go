@@ -50,9 +50,12 @@ func renderDetailView(session ClaudeSessionState, scrollOffset int) string {
 	b.WriteString(headerStyle.Render(header))
 	b.WriteString("\n")
 
-	// Duration
+	// Duration and tmux info
 	duration := formatDuration(session.Duration)
 	info := fmt.Sprintf("Running for: %s │ Output lines: %d", duration, len(session.Output))
+	if session.TmuxSession != "" {
+		info += fmt.Sprintf("\nTmux: tmux attach -t %s", session.TmuxSession)
+	}
 	b.WriteString(sectionStyle.Render(info))
 	b.WriteString("\n\n")
 
@@ -208,6 +211,9 @@ func renderSessions(sessions []ClaudeSessionState, selectedIdx int) string {
 
 		line := fmt.Sprintf("%s %s #%d - %s (%s)",
 			marker, s.Repo, s.PRNumber, s.Action, duration)
+		if s.TmuxSession != "" {
+			line += fmt.Sprintf(" [tmux attach -t %s]", s.TmuxSession)
+		}
 		b.WriteString(style.Render(line))
 		b.WriteString("\n")
 	}

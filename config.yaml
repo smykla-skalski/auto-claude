@@ -4,6 +4,8 @@ log_file: /tmp/auto-claude/logs/auto-claude.log  # Log file path (default: {work
 
 claude:
   model: opus
+  use_tmux: false              # Run Claude sessions in tmux for manual interaction (default: false)
+  tmux_session_prefix: auto-claude  # Prefix for tmux session names (default: auto-claude)
 
 repos:
   - owner: myorg
