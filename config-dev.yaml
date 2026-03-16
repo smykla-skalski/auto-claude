@@ -4,6 +4,7 @@ log_file: /tmp/auto-claude-dev/logs/auto-claude.log
 
 claude:
   model: sonnet
+  use_tmux: true
 
 repos:
   - owner: smykla-skalski
